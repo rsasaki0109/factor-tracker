@@ -1,0 +1,310 @@
+<p align="center">
+  <img src="assets/hero.svg" alt="perception-engine: 2D bounding-box tracking and 3D multi-sensor fusion, rendered from the synthetic demo" width="100%">
+</p>
+
+<h1 align="center">perception-engine</h1>
+
+<p align="center">
+  <a href="https://github.com/rsasaki0109/perception-engine/actions/workflows/ci.yml"><img src="https://github.com/rsasaki0109/perception-engine/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="#license"><img src="https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg" alt="License: MIT OR Apache-2.0"></a>
+  <img src="https://img.shields.io/badge/MSRV-1.89-orange.svg" alt="MSRV 1.89">
+  <img src="https://img.shields.io/badge/dependencies-nalgebra%20%7C%20thiserror-informational.svg" alt="Dependencies: nalgebra, thiserror">
+</p>
+
+<p align="center"><em>The image above is rendered from the synthetic demo — not real sensor data.</em></p>
+
+---
+
+Detector-agnostic multi-object tracking and multi-sensor fusion, written in
+Rust.
+
+`perception-engine` consumes discrete observations produced by external
+detectors or sensor front-ends and performs prediction, data association, state
+estimation and track lifecycle management. It outputs objects with consistent
+IDs and explicit uncertainty. Sensor fusion is done by updating a **shared
+track state** with measurements from several sensors; it is not an average of
+independent tracker outputs.
+
+The core is CPU-only and has no GPU, ROS, Python, OpenCV or inference-engine
+dependency. Numeric work uses `f64`.
+
+> All data shipped in this repository is **synthetic**. Nothing here has been
+> validated against real sensors, and no accuracy, speed or benchmark number is
+> claimed beyond what is explicitly stated in `docs/algorithms.md`.
+
+## What it is
+
+- A small Rust library (`perception-core`) with two concrete trackers:
+  - `BBox2DTracker`: axis-aligned 2D bounding boxes on **one** camera image
+    plane.
+  - `Cartesian3DTracker`: 3D positions in **one** common frame, with
+    multi-sensor sequential fusion.
+- A CLI (`perception-cli`) that generates reproducible synthetic scenarios,
+  reads/writes JSONL observations and tracks, and writes a self-contained HTML
+  visualization.
+
+## What it is not
+
+- It is **not** a detector: no model training or inference, no raw image,
+  point-cloud or radar-signal processing, no monocular depth.
+- It does **not** estimate 3D orientation or extent. `Cartesian3DTracker` is
+  position tracking, not full 3D box tracking.
+- There is no appearance/ReID model, no EKF/UKF, no JPDA/MHT, no
+  track-to-track fusion, no out-of-sequence measurement handling, no
+  auto-calibration, no ego-motion estimation, no ROS/Python bindings and no GUI
+  framework. See `ROADMAP.md`.
+- It is **not** ByteTrack or DeepSORT. Those systems combine specific detectors,
+  appearance models and association strategies. This is a plain linear Kalman
+  filter with IoU/Mahalanobis gating and Hungarian assignment, plus lifecycle
+  management.
+
+## Implemented features
+
+| Area | Status |
+| --- | --- |
+| 2D constant-velocity Kalman tracker (`[cx, cy, w, h]` + velocities) | implemented |
+| 3D constant-velocity Kalman tracker (`[x, y, z]` + velocities) | implemented |
+| Linear Kalman filter with Cholesky solves and Joseph-form updates | implemented |
+| Hungarian (Kuhn–Munkres) assignment with explicit unmatched costs | implemented |
+| IoU gating (2D) and squared-Mahalanobis gating (3D) | implemented |
+| Class-aware gating (`None` class is compatible with everything) | implemented |
+| Track lifecycle: Tentative → Confirmed → Lost → Deleted, with recovery | implemented |
+| Multi-sensor fusion into shared 3D tracks (sequential, independent noise) | implemented |
+| Rigid 3D position/covariance transform helper (`RigidTransform3D`) | implemented |
+| Time-based lifecycle independent of update count, timeouts in nanoseconds | implemented |
+| Batch de-duplication (sensor + sequence) and past-timestamp rejection | implemented |
+| JSONL observation/track/ground-truth I/O with schema version | implemented |
+| Synthetic 2D and 3D demos with fixed seeds | implemented |
+| Local HTML visualization (2D, and top-down XY for 3D) | implemented |
+| Criterion benchmarks at 10/100/1000 objects | implemented |
+
+Future work is listed in [`ROADMAP.md`](ROADMAP.md).
+
+## Layout
+
+```
+perception-engine/
+  crates/perception-core/   library (types, filter, assignment, lifecycle, trackers)
+  crates/perception-cli/    CLI, JSONL schema, synthetic scenarios, HTML rendering
+  docs/                     architecture, data format, algorithms
+  assets/                   reserved for demo assets
+  .github/workflows/        CI
+```
+
+## Requirements
+
+- Rust stable. The declared minimum supported Rust version (MSRV) is **1.89**,
+  which is what the current `nalgebra` release requires. Development and CI are
+  verified on a recent stable toolchain.
+
+## Quick start
+
+Generate both synthetic scenarios, track them and write visualizations:
+
+```sh
+cargo run -p perception-cli -- demo --out-dir demo-out
+```
+
+Then open `demo-out/demo_2d.html` and `demo-out/demo_3d_fusion.html` in a
+browser. The 3D page is a top-down (XY) projection, not a 3D rendering.
+
+The same steps can be run individually:
+
+```sh
+# 1. Generate the 2D scenario (observations + ground truth, JSONL)
+cargo run -p perception-cli -- gen2d --out-dir demo-out --seed 42
+
+# 2. Track it and render
+cargo run -p perception-cli -- track2d \
+    --input demo-out/observations_2d.jsonl \
+    --output demo-out/tracks_2d.jsonl \
+    --truth demo-out/ground_truth_2d.jsonl \
+    --html demo-out/demo_2d.html
+
+# 3D multi-sensor fusion
+cargo run -p perception-cli -- gen3d --out-dir demo-out --seed 42
+cargo run -p perception-cli -- track3d \
+    --input demo-out/observations_3d.jsonl \
+    --output demo-out/tracks_3d.jsonl \
+    --truth demo-out/ground_truth_3d.jsonl \
+    --html demo-out/demo_3d_fusion.html
+```
+
+All commands use `--seed` with a fixed default of `42`; scenarios are fully
+reproducible for a given seed.
+
+## Rust API example
+
+```rust
+use nalgebra::Matrix4;
+use perception_core::*;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut tracker = BBox2DTracker::new(BBox2DTrackerConfig::default())?;
+
+    let batch = ObservationBatch2D {
+        sensor_id: SensorId::new(1),
+        sequence: 0,
+        timestamp: Timestamp::from_nanos(0),
+        frame_id: FrameId::new("camera"),
+        observations: vec![BBox2DObservation {
+            bbox: BBox2D::from_corners(100.0, 50.0, 160.0, 130.0),
+            score: 0.95,
+            class_label: None,
+            covariance: Matrix4::<f64>::identity(),
+        }],
+    };
+
+    let tracks: Vec<Track2DSnapshot> = tracker.process_batch(&batch)?;
+    for track in tracks {
+        println!("{} {:?} {:?}", track.track_id, track.lifecycle, track.bbox);
+    }
+    Ok(())
+}
+```
+
+Run the compiled examples:
+
+```sh
+cargo run -p perception-core --example quickstart
+cargo run -p perception-core --example two_d_tracking
+cargo run -p perception-core --example three_d_fusion
+```
+
+For 3D fusion, convert each sensor's measurement into the common tracking frame
+first:
+
+```rust
+use nalgebra::{Matrix3, Vector3};
+use perception_core::RigidTransform3D;
+
+fn to_tracking_frame() -> Result<(), Box<dyn std::error::Error>> {
+    let sensor_local_to_world =
+        RigidTransform3D::new(Matrix3::identity(), Vector3::new(5.0, 0.0, 0.0))?;
+    let world_position =
+        sensor_local_to_world.transform_position(&Vector3::new(0.0, 0.0, 1.0));
+    let world_covariance =
+        sensor_local_to_world.transform_covariance(&(Matrix3::<f64>::identity() * 0.25))?;
+    let _ = (world_position, world_covariance);
+    Ok(())
+}
+```
+
+## Input / output
+
+Input and output are JSONL: one JSON object per line. Each record has a
+`schema_version` (currently `1`) and a `type`. For 2D:
+
+```json
+{"type":"bbox2d_batch","schema_version":1,"sensor_id":1,"sequence":0,"timestamp_ns":0,"frame_id":"camera","observations":[{"bbox":[100.0,50.0,160.0,130.0],"score":0.95,"class":1,"covariance":[4,0,0,0,0,4,0,0,0,0,4,0,0,0,0,4]}]}
+```
+
+Output lines look like this (abbreviated: the mandatory `covariance` array is
+omitted for brevity):
+
+```json
+{"type":"bbox2d_tracks","schema_version":1,"timestamp_ns":0,"tracks":[{"track_id":1,"lifecycle":"confirmed","state_timestamp_ns":0,"last_observation_timestamp_ns":0,"last_update_sensor":1,"contributing_sensors":[1],"class":1,"updated":true,"prediction_only":false,"observation_times_count":2,"bbox":[100.0,50.0,160.0,130.0],"velocity":[0.0,0.0],"state":[130.0,90.0,60.0,80.0,0.0,0.0,0.0,0.0]}]}
+```
+
+The full schema, units and ordering are documented in
+[`docs/data-format.md`](docs/data-format.md).
+
+## Algorithm overview
+
+```
+Detections / Measurements
+    → Validation and Coordinate Normalization
+    → Prediction (constant velocity, dt from timestamps)
+    → Data Association (gating + Hungarian)
+    → State Update (linear Kalman filter)
+    → Track Lifecycle Management (time based)
+    → Tracked Objects
+```
+
+- **Prediction** uses the real timestamp difference; no fixed frame rate is
+  assumed. Process noise is the continuous-time white-acceleration model scaled
+  by `dt`.
+- **Association** builds a cost matrix (IoU or squared Mahalanobis), applies a
+  hard gate plus a class-compatibility gate, and solves a minimum-cost linear
+  assignment. "Unmatched" is part of the optimization via dummy rows/columns.
+- **Update** is a standard linear Kalman update with a Cholesky solve for the
+  gain and a Joseph-form covariance update.
+- **Lifecycle** transitions depend only on elapsed time and on distinct
+  observation timestamps, never on the number of sensors or on how often
+  `process_batch` is called.
+
+Details, including exact equations and units, are in
+[`docs/algorithms.md`](docs/algorithms.md).
+
+## Assumptions and contracts
+
+- **Time**: all sensors share one synchronized timeline in integer nanoseconds.
+  Observation timestamps must be non-decreasing; a past batch is rejected, not
+  treated as "now". Re-sent batches (same sensor and sequence) are rejected.
+- **Frames**: each tracker is bound to one frame. A batch from another frame is
+  rejected. Renaming a frame is never treated as a coordinate transform. Use
+  `RigidTransform3D` explicitly (the transform's own uncertainty is not
+  modelled).
+- **Noise**: observations are assumed to have independent noise. Correlated
+  observations and track-to-track fusion are out of scope.
+- **Probability**: the detector `score` is a detection confidence. No track
+  existence probability is estimated or output, and `score` is not used as one.
+- **Identity**: stable IDs are expected only where the association problem is
+  unambiguous. Crossings, prolonged full occlusion and identical nearby objects
+  can cause ID switches; zero ID switches are not guaranteed.
+
+## Known limitations
+
+- Linear constant-velocity models only; no maneuver model.
+- 2D and 3D observations are not fused with each other (no 2D-box-to-3D
+  lifting).
+- Box size clamping after prediction is a documented modeling choice; the
+  covariance does not model the clamp.
+- The linear assignment and Kalman filter are `O(n^3)` in the number of tracks
+  / state dimension per update; no gating tree or track management optimization
+  is implemented.
+- `cargo bench` measures only the tracking core, not detection or video I/O, so
+  its numbers are **not** an end-to-end FPS figure.
+
+## Development and verification
+
+```sh
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+cargo doc --workspace --no-deps
+cargo bench --workspace --no-run
+```
+
+The same checks run in CI (`.github/workflows/ci.yml`).
+
+## Related work and references
+
+The algorithms used here are standard and were implemented from their public
+descriptions; no third-party source code was copied.
+
+- R. E. Kalman, "A New Approach to Linear Filtering and Prediction Problems",
+  1960.
+- H. W. Kuhn, "The Hungarian method for the assignment problem", 1955;
+  J. Munkres, "Algorithms for the Assignment and Transportation Problems", 1957.
+  The assignment solver follows the shortest-augmenting-path formulation.
+- A. Bewley et al., "Simple Online and Realtime Tracking" (SORT), 2016 — a
+  reference point for IoU association and Kalman tracking.
+- N. Wojke et al., "Simple Online and Realtime Tracking with a Deep Association
+  Metric" (DeepSORT), 2017 — appearance-assisted association (not implemented).
+- Y. Zhang et al., "ByteTrack: Multi-Object Tracking by Associating Every
+  Detection Box", 2022 — track lifecycle handling (not implemented).
+- The continuous-time white-acceleration process-noise model is the standard
+  "discrete white noise acceleration" model, e.g. Y. Bar-Shalom et al.,
+  "Estimation with Applications to Tracking and Navigation", 2001.
+
+## License
+
+Licensed under either of
+
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
+- MIT license ([LICENSE-MIT](LICENSE-MIT))
+
+at your option. Unless you explicitly state otherwise, any contribution
+intentionally submitted for inclusion in this work shall be dual licensed as
+above, without any additional terms or conditions.

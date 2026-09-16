@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  quality:
+    name: fmt / clippy / test / doc / bench
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Format check
+        run: cargo fmt --all -- --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Tests
+        run: cargo test --workspace
+      - name: Documentation
+        run: cargo doc --workspace --no-deps
+      - name: Build benchmarks
+        run: cargo bench --workspace --no-run
+      - name: Run the library examples
+        run: |
+          cargo run -p perception-core --example quickstart
+          cargo run -p perception-core --example two_d_tracking
+          cargo run -p perception-core --example three_d_fusion
+      - name: Run the CLI demo
+        run: cargo run -p perception-cli -- demo --out-dir demo-out
+
+  msrv:
+    name: MSRV (1.89)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.89.0
+      - uses: Swatinem/rust-cache@v2
+      - name: Check workspace on MSRV
+        run: cargo check --workspace --all-targets
+
+  licenses:
+    name: dependency licenses (cargo-deny)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check licenses

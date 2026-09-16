@@ -1,0 +1,629 @@
+//! 3D position tracker with multi-sensor fusion.
+//!
+//! # State and units
+//!
+//! The Kalman state is
+//!
+//! ```text
+//! [ x, y, z, vx, vy, vz ]
+//! ```
+//!
+//! with position in **meters** and velocity in **meters per second**.
+//! Measurements are positions `[x, y, z]` in meters with a `3x3` covariance in
+//! `meters^2`.
+//!
+//! # Scope
+//!
+//! This is **position tracking**, not full 3D box tracking: orientation and
+//! extent are not estimated because there is no model for them here. All
+//! positions are expected to already be expressed in one common tracking
+//! frame; batches from other frames are rejected rather than transformed
+//! implicitly. Use [`crate::transform::RigidTransform3D`] to bring sensor
+//! measurements into the tracking frame before submitting them.
+//!
+//! Several sensors can update the same track. Each batch is fused
+//! sequentially and independently; observations are assumed to have
+//! independent noise and correlated observations / track-to-track fusion are
+//! out of scope.
+
+use std::collections::BTreeMap;
+
+use nalgebra::{SMatrix, SVector, Vector3};
+
+use crate::assignment::linear_assignment;
+use crate::association::{classes_compatible, mahalanobis_association_cost};
+use crate::error::{check_timestamp_order, InputError, TrackerError};
+use crate::filter::KalmanFilter;
+use crate::lifecycle::TrackLifecycle;
+use crate::math::linalg::validate_covariance;
+use crate::math::models::{cv_f6, cv_q6, measurement_h3};
+use crate::tracker::record_sensor;
+use crate::types::{
+    ClassLabel, FrameId, ObservationBatch3D, Position3DObservation, SensorId, Timestamp, TrackId,
+    TrackLifecycleState, TrackerConfig,
+};
+
+/// Default squared-Mahalanobis gate for a 3D position.
+///
+/// This is the `0.999` quantile of a chi-square distribution with 3 degrees of
+/// freedom (the measurement dimension).
+pub const DEFAULT_GATE_SQUARED_MAHALANOBIS: f64 = 16.266;
+
+/// Configuration for [`Cartesian3DTracker`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct Cartesian3DTrackerConfig {
+    /// Shared lifecycle parameters.
+    pub common: TrackerConfig,
+    /// The single tracking frame this tracker accepts.
+    pub frame_id: FrameId,
+    /// Acceleration spectral density for the continuous-time white-acceleration
+    /// model, in `meters^2 / s^3`.
+    pub accel_spectral_density: f64,
+    /// Initial velocity variance in `meters^2 / s^2`.
+    pub initial_velocity_variance: f64,
+    /// Gating threshold on the **squared** Mahalanobis distance of a 3D
+    /// position (measurement dimension 3). Values above this are never
+    /// associated.
+    pub gate_squared_mahalanobis: f64,
+}
+
+impl Default for Cartesian3DTrackerConfig {
+    fn default() -> Self {
+        Cartesian3DTrackerConfig {
+            common: TrackerConfig::default(),
+            frame_id: FrameId::new("world"),
+            accel_spectral_density: 1.0,
+            initial_velocity_variance: 4.0,
+            gate_squared_mahalanobis: DEFAULT_GATE_SQUARED_MAHALANOBIS,
+        }
+    }
+}
+
+impl Cartesian3DTrackerConfig {
+    /// Validates the configuration.
+    pub fn validate(&self) -> Result<(), InputError> {
+        self.common.validate()?;
+        if !self.accel_spectral_density.is_finite() || self.accel_spectral_density < 0.0 {
+            return Err(InputError::InvalidConfig {
+                reason: "accel_spectral_density must be finite and >= 0",
+            });
+        }
+        if !self.initial_velocity_variance.is_finite() || self.initial_velocity_variance <= 0.0 {
+            return Err(InputError::InvalidConfig {
+                reason: "initial_velocity_variance must be finite and > 0",
+            });
+        }
+        if !self.gate_squared_mahalanobis.is_finite() || self.gate_squared_mahalanobis <= 0.0 {
+            return Err(InputError::InvalidConfig {
+                reason: "gate_squared_mahalanobis must be finite and > 0",
+            });
+        }
+        Ok(())
+    }
+}
+
+/// Snapshot of one 3D track at a point in time.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Track3DSnapshot {
+    /// Track identifier.
+    pub track_id: TrackId,
+    /// Lifecycle state.
+    pub lifecycle: TrackLifecycleState,
+    /// Time the state estimate refers to.
+    pub state_timestamp: Timestamp,
+    /// Time of the most recent observation.
+    pub last_observation_timestamp: Option<Timestamp>,
+    /// Sensor that produced the most recent observation.
+    pub last_update_sensor: Option<SensorId>,
+    /// Distinct sensors that have contributed observations (bounded).
+    pub contributing_sensors: Vec<SensorId>,
+    /// Class label, if known.
+    pub class_label: Option<ClassLabel>,
+    /// Whether this track was updated by an observation in the last processed
+    /// batch.
+    pub updated_in_last_batch: bool,
+    /// Number of distinct observation timestamps seen by this track. Used for
+    /// confirmation and independent of how many sensors reported.
+    pub observation_times_count: u32,
+    /// Estimated position in meters.
+    pub position: Vector3<f64>,
+    /// Estimated velocity in meters per second.
+    pub velocity: Vector3<f64>,
+    /// Full state estimate `[x, y, z, vx, vy, vz]`.
+    pub state: SVector<f64, 6>,
+    /// Full state covariance.
+    pub covariance: SMatrix<f64, 6, 6>,
+}
+
+impl Track3DSnapshot {
+    /// Returns `true` when the estimate is a prediction not backed by an
+    /// observation at [`Track3DSnapshot::state_timestamp`].
+    pub fn is_prediction_only(&self) -> bool {
+        self.last_observation_timestamp != Some(self.state_timestamp)
+    }
+}
+
+#[derive(Debug, Clone)]
+struct Track3D {
+    id: TrackId,
+    filter: KalmanFilter<6, 3>,
+    lifecycle: TrackLifecycle,
+    class_label: Option<ClassLabel>,
+    state_timestamp: Timestamp,
+    last_update_sensor: Option<SensorId>,
+    contributing_sensors: Vec<SensorId>,
+    updated_this_batch: bool,
+}
+
+/// Constant-velocity tracker for 3D positions in one common frame.
+///
+/// Several sensors may update the same track; see the module documentation for
+/// the fusion assumptions.
+#[derive(Debug, Clone)]
+pub struct Cartesian3DTracker {
+    config: Cartesian3DTrackerConfig,
+    tracks: Vec<Track3D>,
+    next_track_id: u64,
+    last_time: Option<Timestamp>,
+    last_sequence: BTreeMap<SensorId, u64>,
+}
+
+impl Cartesian3DTracker {
+    /// Creates a tracker, validating the configuration.
+    pub fn new(config: Cartesian3DTrackerConfig) -> Result<Self, TrackerError> {
+        config.validate()?;
+        Ok(Cartesian3DTracker {
+            config,
+            tracks: Vec::new(),
+            next_track_id: 1,
+            last_time: None,
+            last_sequence: BTreeMap::new(),
+        })
+    }
+
+    /// The tracking frame this tracker is bound to.
+    pub fn frame_id(&self) -> &FrameId {
+        &self.config.frame_id
+    }
+
+    /// Number of tracks currently alive.
+    pub fn active_track_count(&self) -> usize {
+        self.tracks.len()
+    }
+
+    /// Current tracker time, if any batch has been processed.
+    pub fn current_time(&self) -> Option<Timestamp> {
+        self.last_time
+    }
+
+    /// Immutable access to the configuration.
+    pub fn config(&self) -> &Cartesian3DTrackerConfig {
+        &self.config
+    }
+
+    /// Current snapshots of every live track.
+    pub fn snapshots(&self) -> Vec<Track3DSnapshot> {
+        self.tracks
+            .iter()
+            .map(|track| self.snapshot_of(track))
+            .collect()
+    }
+
+    /// Advances every live track to `timestamp` without any observation.
+    pub fn predict_to(&mut self, timestamp: Timestamp) -> Result<(), TrackerError> {
+        let backup = self.clone();
+        match self.predict_to_inner(timestamp) {
+            Ok(()) => Ok(()),
+            Err(error) => {
+                *self = backup;
+                Err(error)
+            }
+        }
+    }
+
+    /// Predicts, associates and updates using one sensor batch.
+    ///
+    /// Each batch is fused independently, so sensors running at different
+    /// rates (or at the same instant) update tracks sequentially. Invalid
+    /// input is rejected before any state change and the operation rolls back
+    /// on error.
+    pub fn process_batch(
+        &mut self,
+        batch: &ObservationBatch3D,
+    ) -> Result<Vec<Track3DSnapshot>, TrackerError> {
+        self.validate_batch(batch)?;
+        let backup = self.clone();
+        match self.process_batch_inner(batch) {
+            Ok(snapshots) => Ok(snapshots),
+            Err(error) => {
+                *self = backup;
+                Err(error)
+            }
+        }
+    }
+
+    fn validate_batch(&self, batch: &ObservationBatch3D) -> Result<(), TrackerError> {
+        if batch.frame_id != self.config.frame_id {
+            return Err(InputError::FrameMismatch {
+                expected: self.config.frame_id.to_string(),
+                found: batch.frame_id.to_string(),
+            }
+            .into());
+        }
+        check_timestamp_order(self.last_time, batch.timestamp)?;
+        if let Some(&last_seen) = self.last_sequence.get(&batch.sensor_id) {
+            if batch.sequence <= last_seen {
+                return Err(InputError::DuplicateBatch {
+                    sensor: batch.sensor_id,
+                    received: batch.sequence,
+                    last_seen,
+                }
+                .into());
+            }
+        }
+        for observation in &batch.observations {
+            if !observation.position.iter().all(|x| x.is_finite()) {
+                return Err(InputError::NonFiniteValue {
+                    context: "position3d position",
+                }
+                .into());
+            }
+            validate_covariance(&observation.covariance, "position3d measurement covariance")?;
+        }
+        Ok(())
+    }
+
+    fn process_batch_inner(
+        &mut self,
+        batch: &ObservationBatch3D,
+    ) -> Result<Vec<Track3DSnapshot>, TrackerError> {
+        self.predict_to_inner(batch.timestamp)?;
+        for track in &mut self.tracks {
+            track.updated_this_batch = false;
+        }
+
+        let h = measurement_h3();
+        let n_tracks = self.tracks.len();
+        let n_observations = batch.observations.len();
+        let mut costs = vec![vec![f64::INFINITY; n_observations]; n_tracks];
+        for (i, track) in self.tracks.iter().enumerate() {
+            for (j, observation) in batch.observations.iter().enumerate() {
+                if !classes_compatible(track.class_label, observation.class_label) {
+                    continue;
+                }
+                let squared_distance = track.filter.squared_mahalanobis(
+                    &observation.position,
+                    &h,
+                    &observation.covariance,
+                )?;
+                if let Some(cost) = mahalanobis_association_cost(
+                    squared_distance,
+                    self.config.gate_squared_mahalanobis,
+                ) {
+                    costs[i][j] = cost;
+                }
+            }
+        }
+
+        let assignment = linear_assignment(
+            &costs,
+            n_observations,
+            self.config.gate_squared_mahalanobis,
+            0.0,
+        )?;
+
+        for &(i, j) in &assignment.pairs {
+            let observation = &batch.observations[j];
+            self.tracks[i]
+                .filter
+                .update(&observation.position, &h, &observation.covariance)?;
+            self.apply_observation(i, observation.class_label, batch);
+            self.tracks[i].updated_this_batch = true;
+        }
+
+        for &j in &assignment.unmatched_columns {
+            // 3D position observations carry no detection score in this
+            // version, so `new_track_score_threshold` does not apply here.
+            let observation = &batch.observations[j];
+            self.spawn_track(observation, batch.timestamp, batch.sensor_id)?;
+        }
+
+        self.last_sequence.insert(batch.sensor_id, batch.sequence);
+        self.last_time = Some(batch.timestamp);
+        Ok(self.snapshots())
+    }
+
+    fn apply_observation(
+        &mut self,
+        index: usize,
+        class_label: Option<ClassLabel>,
+        batch: &ObservationBatch3D,
+    ) {
+        let track = &mut self.tracks[index];
+        track
+            .lifecycle
+            .register_observation(batch.timestamp, &self.config.common);
+        track.state_timestamp = batch.timestamp;
+        track.last_update_sensor = Some(batch.sensor_id);
+        record_sensor(
+            &mut track.contributing_sensors,
+            batch.sensor_id,
+            self.config.common.max_contributing_sensors,
+        );
+        if track.class_label.is_none() {
+            track.class_label = class_label;
+        }
+    }
+
+    fn spawn_track(
+        &mut self,
+        observation: &Position3DObservation,
+        timestamp: Timestamp,
+        sensor: SensorId,
+    ) -> Result<(), TrackerError> {
+        let mut state = SVector::<f64, 6>::zeros();
+        state[0] = observation.position.x;
+        state[1] = observation.position.y;
+        state[2] = observation.position.z;
+
+        let mut covariance = SMatrix::<f64, 6, 6>::zeros();
+        for r in 0..3 {
+            for c in 0..3 {
+                covariance[(r, c)] = observation.covariance[(r, c)];
+            }
+        }
+        covariance[(3, 3)] = self.config.initial_velocity_variance;
+        covariance[(4, 4)] = self.config.initial_velocity_variance;
+        covariance[(5, 5)] = self.config.initial_velocity_variance;
+
+        let filter = KalmanFilter::<6, 3>::new(state, covariance)?;
+        let mut lifecycle = TrackLifecycle::new(timestamp);
+        lifecycle.register_observation(timestamp, &self.config.common);
+        let mut contributing_sensors = Vec::new();
+        record_sensor(
+            &mut contributing_sensors,
+            sensor,
+            self.config.common.max_contributing_sensors,
+        );
+
+        let id = TrackId::new(self.next_track_id);
+        self.next_track_id = self.next_track_id.saturating_add(1);
+        self.tracks.push(Track3D {
+            id,
+            filter,
+            lifecycle,
+            class_label: observation.class_label,
+            state_timestamp: timestamp,
+            last_update_sensor: Some(sensor),
+            contributing_sensors,
+            updated_this_batch: true,
+        });
+        Ok(())
+    }
+
+    fn predict_to_inner(&mut self, timestamp: Timestamp) -> Result<(), TrackerError> {
+        if let Some(previous) = self.last_time {
+            if timestamp < previous {
+                return Err(InputError::TimestampWentBackwards {
+                    received_ns: timestamp.as_nanos(),
+                    current_ns: previous.as_nanos(),
+                }
+                .into());
+            }
+        }
+
+        let common = self.config.common.clone();
+        self.tracks
+            .retain_mut(|track| !track.lifecycle.advance(timestamp, &common));
+
+        let q = self.config.accel_spectral_density;
+        for track in &mut self.tracks {
+            let dt_ns = timestamp.checked_duration_since(track.state_timestamp)?;
+            if dt_ns == 0 {
+                continue;
+            }
+            let dt = dt_ns as f64 / 1.0e9;
+            track.filter.predict(&cv_f6(dt), &cv_q6(dt, q))?;
+            track.state_timestamp = timestamp;
+        }
+
+        self.last_time = Some(timestamp);
+        Ok(())
+    }
+
+    fn snapshot_of(&self, track: &Track3D) -> Track3DSnapshot {
+        let state = track.filter.state();
+        Track3DSnapshot {
+            track_id: track.id,
+            lifecycle: track.lifecycle.state(),
+            state_timestamp: track.state_timestamp,
+            last_observation_timestamp: track.lifecycle.last_observation_timestamp(),
+            last_update_sensor: track.last_update_sensor,
+            contributing_sensors: track.contributing_sensors.clone(),
+            class_label: track.class_label,
+            updated_in_last_batch: track.updated_this_batch,
+            observation_times_count: track.lifecycle.observation_times_count(),
+            position: Vector3::new(state[0], state[1], state[2]),
+            velocity: Vector3::new(state[3], state[4], state[5]),
+            state: *state,
+            covariance: *track.filter.covariance(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use approx::assert_relative_eq;
+    use nalgebra::Matrix3;
+
+    fn config() -> Cartesian3DTrackerConfig {
+        let mut config = Cartesian3DTrackerConfig::default();
+        config.common.confirm_min_observation_times = 1;
+        config.common.confirmed_to_lost_ns = 500_000_000;
+        config.common.lost_to_delete_ns = 1_000_000_000;
+        config.common.tentative_timeout_ns = 1_000_000_000;
+        config.gate_squared_mahalanobis = 100.0;
+        config
+    }
+
+    fn observation(x: f64, y: f64, z: f64) -> Position3DObservation {
+        Position3DObservation {
+            position: Vector3::new(x, y, z),
+            covariance: Matrix3::identity(),
+            class_label: None,
+        }
+    }
+
+    fn batch(
+        sensor: u32,
+        sequence: u64,
+        timestamp_ns: i64,
+        observations: Vec<Position3DObservation>,
+    ) -> ObservationBatch3D {
+        ObservationBatch3D {
+            sensor_id: SensorId::new(sensor),
+            sequence,
+            timestamp: Timestamp::from_nanos(timestamp_ns),
+            frame_id: FrameId::new("world"),
+            observations,
+        }
+    }
+
+    #[test]
+    fn two_sensors_fuse_into_one_track() {
+        let mut tracker = Cartesian3DTracker::new(config()).unwrap();
+        tracker
+            .process_batch(&batch(1, 0, 0, vec![observation(0.0, 0.0, 0.0)]))
+            .unwrap();
+        let snapshots = tracker
+            .process_batch(&batch(2, 0, 100_000_000, vec![observation(0.1, 0.0, 0.0)]))
+            .unwrap();
+        assert_eq!(snapshots.len(), 1);
+        assert_eq!(snapshots[0].contributing_sensors.len(), 2);
+        assert_eq!(snapshots[0].contributing_sensors[0], SensorId::new(1));
+        assert_eq!(snapshots[0].contributing_sensors[1], SensorId::new(2));
+        assert_eq!(snapshots[0].last_update_sensor, Some(SensorId::new(2)));
+    }
+
+    #[test]
+    fn same_timestamp_multi_sensor_updates_same_track() {
+        let mut tracker = Cartesian3DTracker::new(config()).unwrap();
+        tracker
+            .process_batch(&batch(1, 0, 0, vec![observation(0.0, 0.0, 0.0)]))
+            .unwrap();
+        tracker
+            .process_batch(&batch(2, 0, 0, vec![observation(0.0, 0.0, 0.0)]))
+            .unwrap();
+        assert_eq!(tracker.active_track_count(), 1);
+        let snapshots = tracker.snapshots();
+        assert_eq!(snapshots[0].contributing_sensors.len(), 2);
+    }
+
+    #[test]
+    fn different_observation_periods_are_supported() {
+        let mut tracker = Cartesian3DTracker::new(config()).unwrap();
+        tracker
+            .process_batch(&batch(1, 0, 0, vec![observation(0.0, 0.0, 0.0)]))
+            .unwrap();
+        tracker
+            .process_batch(&batch(1, 1, 100_000_000, vec![observation(1.0, 0.0, 0.0)]))
+            .unwrap();
+        // Sensor 2 runs at a slower rate but still associates.
+        let snapshots = tracker
+            .process_batch(&batch(2, 0, 200_000_000, vec![observation(2.0, 0.0, 0.0)]))
+            .unwrap();
+        assert_eq!(snapshots.len(), 1);
+        assert!(snapshots[0].velocity.x > 0.0);
+    }
+
+    #[test]
+    fn frame_mismatch_is_rejected() {
+        let mut tracker = Cartesian3DTracker::new(config()).unwrap();
+        let mut bad = batch(1, 0, 0, vec![observation(0.0, 0.0, 0.0)]);
+        bad.frame_id = FrameId::new("sensor-local");
+        let error = tracker.process_batch(&bad).unwrap_err();
+        assert!(matches!(
+            error,
+            TrackerError::Input(InputError::FrameMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn outlier_is_gated_and_spawns_track() {
+        let mut tracker = Cartesian3DTracker::new(config()).unwrap();
+        tracker
+            .process_batch(&batch(1, 0, 0, vec![observation(0.0, 0.0, 0.0)]))
+            .unwrap();
+        let snapshots = tracker
+            .process_batch(&batch(
+                1,
+                1,
+                100_000_000,
+                vec![observation(1000.0, 0.0, 0.0)],
+            ))
+            .unwrap();
+        assert_eq!(snapshots.len(), 2);
+        assert_eq!(snapshots[1].track_id.value(), 2);
+    }
+
+    #[test]
+    fn invalid_position_is_rejected_without_state_change() {
+        let mut tracker = Cartesian3DTracker::new(config()).unwrap();
+        tracker
+            .process_batch(&batch(1, 0, 0, vec![observation(0.0, 0.0, 0.0)]))
+            .unwrap();
+        let before = tracker.snapshots();
+        let bad = batch(1, 1, 100_000_000, vec![observation(f64::NAN, 0.0, 0.0)]);
+        assert!(tracker.process_batch(&bad).is_err());
+        assert_eq!(tracker.snapshots(), before);
+    }
+
+    #[test]
+    fn invalid_covariance_is_rejected() {
+        let mut tracker = Cartesian3DTracker::new(config()).unwrap();
+        let mut bad_observation = observation(0.0, 0.0, 0.0);
+        bad_observation.covariance = Matrix3::zeros();
+        let bad = batch(1, 0, 0, vec![bad_observation]);
+        let error = tracker.process_batch(&bad).unwrap_err();
+        assert!(error.is_numeric_error() || error.is_input_error());
+    }
+
+    #[test]
+    fn lost_then_deleted_by_time() {
+        let mut tracker = Cartesian3DTracker::new(config()).unwrap();
+        tracker
+            .process_batch(&batch(1, 0, 0, vec![observation(0.0, 0.0, 0.0)]))
+            .unwrap();
+        tracker
+            .predict_to(Timestamp::from_nanos(600_000_000))
+            .unwrap();
+        assert_eq!(tracker.snapshots()[0].lifecycle, TrackLifecycleState::Lost);
+        tracker
+            .predict_to(Timestamp::from_nanos(2_000_000_000))
+            .unwrap();
+        assert_eq!(tracker.active_track_count(), 0);
+    }
+
+    #[test]
+    fn velocity_converges_for_constant_motion() {
+        let mut config = config();
+        config.accel_spectral_density = 0.01;
+        config.initial_velocity_variance = 25.0;
+        let mut tracker = Cartesian3DTracker::new(config).unwrap();
+        let mut snapshots = Vec::new();
+        for step in 0..6 {
+            let t = step as i64 * 1_000_000_000;
+            snapshots = tracker
+                .process_batch(&batch(
+                    1,
+                    step,
+                    t,
+                    vec![observation(10.0 * step as f64, 0.0, 0.0)],
+                ))
+                .unwrap();
+        }
+        assert_eq!(snapshots.len(), 1);
+        assert_relative_eq!(snapshots[0].velocity.x, 10.0, epsilon = 1.0);
+    }
+}
