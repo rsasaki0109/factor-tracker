@@ -39,8 +39,8 @@ use crate::math::linalg::validate_covariance;
 use crate::math::models::{cv_f6, cv_q6, measurement_h3};
 use crate::tracker::record_sensor;
 use crate::types::{
-    ClassLabel, FrameId, ObservationBatch3D, Position3DObservation, SensorId, Timestamp, TrackId,
-    TrackLifecycleState, TrackerConfig,
+    ClassLabel, ClassPrior, FrameId, ObservationBatch3D, Position3DObservation, SensorId,
+    Timestamp, TrackId, TrackLifecycleState, TrackerConfig,
 };
 
 /// Default squared-Mahalanobis gate for a 3D position.
@@ -65,6 +65,14 @@ pub struct Cartesian3DTrackerConfig {
     /// position (measurement dimension 3). Values above this are never
     /// associated.
     pub gate_squared_mahalanobis: f64,
+    /// Maximum soft cost added when an observation's known class contradicts a
+    /// track's [`ClassPrior`]. The added cost is
+    /// `class_prior_penalty * prior.confidence`, so a weak prior barely shifts
+    /// the association and a strong prior can outweigh a small spatial
+    /// difference. Set to `0.0` to disable class-prior influence entirely.
+    ///
+    /// The prior is never a hard gate; the spatial gate always applies.
+    pub class_prior_penalty: f64,
 }
 
 impl Default for Cartesian3DTrackerConfig {
@@ -75,6 +83,7 @@ impl Default for Cartesian3DTrackerConfig {
             accel_spectral_density: 1.0,
             initial_velocity_variance: 4.0,
             gate_squared_mahalanobis: DEFAULT_GATE_SQUARED_MAHALANOBIS,
+            class_prior_penalty: 8.0,
         }
     }
 }
@@ -98,6 +107,11 @@ impl Cartesian3DTrackerConfig {
                 reason: "gate_squared_mahalanobis must be finite and > 0",
             });
         }
+        if !self.class_prior_penalty.is_finite() || self.class_prior_penalty < 0.0 {
+            return Err(InputError::InvalidConfig {
+                reason: "class_prior_penalty must be finite and >= 0",
+            });
+        }
         Ok(())
     }
 }
@@ -117,8 +131,11 @@ pub struct Track3DSnapshot {
     pub last_update_sensor: Option<SensorId>,
     /// Distinct sensors that have contributed observations (bounded).
     pub contributing_sensors: Vec<SensorId>,
-    /// Class label, if known.
+    /// Class label derived from positional observations, if known.
     pub class_label: Option<ClassLabel>,
+    /// Soft class prior supplied by an auxiliary source (for example camera
+    /// evidence). Never a hard gate.
+    pub class_prior: Option<ClassPrior>,
     /// Whether this track was updated by an observation in the last processed
     /// batch.
     pub updated_in_last_batch: bool,
@@ -143,12 +160,52 @@ impl Track3DSnapshot {
     }
 }
 
+/// Outcome of associating one observation of a batch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ObservationOutcome {
+    /// Matched an existing track and updated it.
+    Updated,
+    /// Did not match and spawned a new track.
+    Spawned,
+    /// Did not match and did not spawn a track.
+    Unmatched,
+}
+
+/// Association diagnostic for one observation of a batch.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ObservationAssociation {
+    /// Index of the observation within its batch.
+    pub observation_index: usize,
+    /// Track it updated or spawned, if any.
+    pub track_id: Option<TrackId>,
+    /// What happened to the observation.
+    pub outcome: ObservationOutcome,
+    /// Assignment cost used for this observation, when it was matched. For
+    /// position tracking this is the squared Mahalanobis distance plus any soft
+    /// class-prior penalty.
+    pub cost: Option<f64>,
+}
+
+/// Diagnostic report for one processed 3D batch.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BatchReport3D {
+    /// Batch timestamp.
+    pub timestamp: Timestamp,
+    /// Sensor that produced the batch.
+    pub sensor_id: SensorId,
+    /// One entry per observation, in batch order.
+    pub associations: Vec<ObservationAssociation>,
+    /// Tracks that were not matched by any observation in this batch.
+    pub unmatched_track_ids: Vec<TrackId>,
+}
+
 #[derive(Debug, Clone)]
 struct Track3D {
     id: TrackId,
     filter: KalmanFilter<6, 3>,
     lifecycle: TrackLifecycle,
     class_label: Option<ClassLabel>,
+    class_prior: Option<ClassPrior>,
     state_timestamp: Timestamp,
     last_update_sensor: Option<SensorId>,
     contributing_sensors: Vec<SensorId>,
@@ -232,14 +289,82 @@ impl Cartesian3DTracker {
         batch: &ObservationBatch3D,
     ) -> Result<Vec<Track3DSnapshot>, TrackerError> {
         self.validate_batch(batch)?;
+        self.run_transactional(|tracker| {
+            tracker
+                .process_batch_inner(batch)
+                .map(|(snapshots, _report)| snapshots)
+        })
+    }
+
+    /// Like [`Cartesian3DTracker::process_batch`] but also returns a
+    /// [`BatchReport3D`] describing which observation matched which track.
+    ///
+    /// The report is intended for the engine/SDK layer, which needs to attach
+    /// per-detection metadata (for example a 3D box shape) to the tracks that
+    /// were updated or created.
+    pub fn process_batch_reported(
+        &mut self,
+        batch: &ObservationBatch3D,
+    ) -> Result<(Vec<Track3DSnapshot>, BatchReport3D), TrackerError> {
+        self.validate_batch(batch)?;
+        self.run_transactional(|tracker| tracker.process_batch_inner(batch))
+    }
+
+    /// Runs `operation` against a clone of the tracker and restores the clone
+    /// if it returns an error, so a failed batch never leaves partial state.
+    fn run_transactional<T>(
+        &mut self,
+        operation: impl FnOnce(&mut Self) -> Result<T, TrackerError>,
+    ) -> Result<T, TrackerError> {
         let backup = self.clone();
-        match self.process_batch_inner(batch) {
-            Ok(snapshots) => Ok(snapshots),
+        match operation(self) {
+            Ok(value) => Ok(value),
             Err(error) => {
                 *self = backup;
                 Err(error)
             }
         }
+    }
+
+    /// Sets or replaces a track's soft class prior.
+    ///
+    /// Returns `false` (and changes nothing) when no such track exists or when
+    /// `confidence` is not finite. `confidence` is clamped to `[0, 1]`.
+    pub fn set_class_prior(
+        &mut self,
+        track_id: TrackId,
+        label: ClassLabel,
+        confidence: f64,
+    ) -> bool {
+        if !confidence.is_finite() {
+            return false;
+        }
+        let confidence = confidence.clamp(0.0, 1.0);
+        if let Some(track) = self.tracks.iter_mut().find(|track| track.id == track_id) {
+            track.class_prior = Some(ClassPrior { label, confidence });
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Removes a track's soft class prior. Returns `false` if there is no such
+    /// track.
+    pub fn clear_class_prior(&mut self, track_id: TrackId) -> bool {
+        if let Some(track) = self.tracks.iter_mut().find(|track| track.id == track_id) {
+            track.class_prior = None;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Returns a track's current soft class prior.
+    pub fn class_prior(&self, track_id: TrackId) -> Option<ClassPrior> {
+        self.tracks
+            .iter()
+            .find(|track| track.id == track_id)
+            .and_then(|track| track.class_prior)
     }
 
     fn validate_batch(&self, batch: &ObservationBatch3D) -> Result<(), TrackerError> {
@@ -276,7 +401,7 @@ impl Cartesian3DTracker {
     fn process_batch_inner(
         &mut self,
         batch: &ObservationBatch3D,
-    ) -> Result<Vec<Track3DSnapshot>, TrackerError> {
+    ) -> Result<(Vec<Track3DSnapshot>, BatchReport3D), TrackerError> {
         self.predict_to_inner(batch.timestamp)?;
         for track in &mut self.tracks {
             track.updated_this_batch = false;
@@ -296,10 +421,19 @@ impl Cartesian3DTracker {
                     &h,
                     &observation.covariance,
                 )?;
-                if let Some(cost) = mahalanobis_association_cost(
+                if let Some(mut cost) = mahalanobis_association_cost(
                     squared_distance,
                     self.config.gate_squared_mahalanobis,
                 ) {
+                    // Soft class prior (e.g. camera evidence): only penalize,
+                    // never forbid. The spatial gate above has already applied.
+                    if let (Some(prior), Some(observed)) =
+                        (track.class_prior, observation.class_label)
+                    {
+                        if prior.label != observed {
+                            cost += self.config.class_prior_penalty * prior.confidence;
+                        }
+                    }
                     costs[i][j] = cost;
                 }
             }
@@ -312,6 +446,15 @@ impl Cartesian3DTracker {
             0.0,
         )?;
 
+        let mut associations: Vec<ObservationAssociation> = (0..n_observations)
+            .map(|observation_index| ObservationAssociation {
+                observation_index,
+                track_id: None,
+                outcome: ObservationOutcome::Unmatched,
+                cost: None,
+            })
+            .collect();
+
         for &(i, j) in &assignment.pairs {
             let observation = &batch.observations[j];
             self.tracks[i]
@@ -319,18 +462,42 @@ impl Cartesian3DTracker {
                 .update(&observation.position, &h, &observation.covariance)?;
             self.apply_observation(i, observation.class_label, batch);
             self.tracks[i].updated_this_batch = true;
+            associations[j] = ObservationAssociation {
+                observation_index: j,
+                track_id: Some(self.tracks[i].id),
+                outcome: ObservationOutcome::Updated,
+                cost: Some(costs[i][j]),
+            };
         }
 
         for &j in &assignment.unmatched_columns {
             // 3D position observations carry no detection score in this
             // version, so `new_track_score_threshold` does not apply here.
             let observation = &batch.observations[j];
-            self.spawn_track(observation, batch.timestamp, batch.sensor_id)?;
+            let track_id = self.spawn_track(observation, batch.timestamp, batch.sensor_id)?;
+            associations[j] = ObservationAssociation {
+                observation_index: j,
+                track_id: Some(track_id),
+                outcome: ObservationOutcome::Spawned,
+                cost: None,
+            };
         }
+
+        let unmatched_track_ids = assignment
+            .unmatched_rows
+            .iter()
+            .map(|&i| self.tracks[i].id)
+            .collect();
 
         self.last_sequence.insert(batch.sensor_id, batch.sequence);
         self.last_time = Some(batch.timestamp);
-        Ok(self.snapshots())
+        let report = BatchReport3D {
+            timestamp: batch.timestamp,
+            sensor_id: batch.sensor_id,
+            associations,
+            unmatched_track_ids,
+        };
+        Ok((self.snapshots(), report))
     }
 
     fn apply_observation(
@@ -360,7 +527,7 @@ impl Cartesian3DTracker {
         observation: &Position3DObservation,
         timestamp: Timestamp,
         sensor: SensorId,
-    ) -> Result<(), TrackerError> {
+    ) -> Result<TrackId, TrackerError> {
         let mut state = SVector::<f64, 6>::zeros();
         state[0] = observation.position.x;
         state[1] = observation.position.y;
@@ -393,12 +560,13 @@ impl Cartesian3DTracker {
             filter,
             lifecycle,
             class_label: observation.class_label,
+            class_prior: None,
             state_timestamp: timestamp,
             last_update_sensor: Some(sensor),
             contributing_sensors,
             updated_this_batch: true,
         });
-        Ok(())
+        Ok(id)
     }
 
     fn predict_to_inner(&mut self, timestamp: Timestamp) -> Result<(), TrackerError> {
@@ -441,6 +609,7 @@ impl Cartesian3DTracker {
             last_update_sensor: track.last_update_sensor,
             contributing_sensors: track.contributing_sensors.clone(),
             class_label: track.class_label,
+            class_prior: track.class_prior,
             updated_in_last_batch: track.updated_this_batch,
             observation_times_count: track.lifecycle.observation_times_count(),
             position: Vector3::new(state[0], state[1], state[2]),

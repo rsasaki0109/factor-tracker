@@ -16,7 +16,10 @@ pub mod tracker2d;
 pub mod tracker3d;
 
 pub use tracker2d::{BBox2DTracker, BBox2DTrackerConfig, Track2DSnapshot};
-pub use tracker3d::{Cartesian3DTracker, Cartesian3DTrackerConfig, Track3DSnapshot};
+pub use tracker3d::{
+    BatchReport3D, Cartesian3DTracker, Cartesian3DTrackerConfig, ObservationAssociation,
+    ObservationOutcome, Track3DSnapshot,
+};
 
 use crate::error::InputError;
 use crate::types::SensorId;

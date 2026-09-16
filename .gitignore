@@ -2,3 +2,5 @@
 /demo-out
 **/*.rs.bk
 Cargo.lock.bak
+/cam-demo-out
+/cam-demo-out-injected

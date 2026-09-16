@@ -4,8 +4,10 @@
 //! file I/O, scenario generation and visualization, and delegates all tracking
 //! to `perception-core`.
 
+mod cam;
 mod jsonl;
 mod render;
+mod report;
 mod scenario;
 
 use std::path::{Path, PathBuf};
@@ -94,6 +96,165 @@ enum Command {
         /// Deterministic seed.
         #[arg(long, default_value_t = 42)]
         seed: u64,
+    },
+    /// Write the synthetic camera+LiDAR fixture (setup, inputs, truth).
+    CamFixture {
+        /// Output directory.
+        #[arg(long, default_value = "cam-demo-out")]
+        out_dir: PathBuf,
+        /// Deterministic seed.
+        #[arg(long, default_value_t = 42)]
+        seed: u64,
+    },
+    /// Prepare a KITTI sequence directory into engine inputs and truth.
+    Prepare {
+        /// KITTI calib.txt.
+        #[arg(long)]
+        calib: PathBuf,
+        /// KITTI times.txt.
+        #[arg(long)]
+        times: PathBuf,
+        /// Optional KITTI poses.txt.
+        #[arg(long)]
+        poses: Option<PathBuf>,
+        /// Directory of per-frame 3D detection files.
+        #[arg(long)]
+        lidar_detections: PathBuf,
+        /// Directory of per-frame 2D detection files.
+        #[arg(long)]
+        camera_detections: PathBuf,
+        /// Optional directory of per-frame 3D label files (truth).
+        #[arg(long)]
+        lidar_labels: Option<PathBuf>,
+        /// Image width.
+        #[arg(long, default_value_t = 1242)]
+        image_width: u32,
+        /// Image height.
+        #[arg(long, default_value_t = 375)]
+        image_height: u32,
+        /// Near plane in metres.
+        #[arg(long, default_value_t = 0.3)]
+        near_plane: f64,
+        /// Default position variance for 3D detections (m^2).
+        #[arg(long, default_value_t = 0.25)]
+        default_covariance: f64,
+        /// Maximum pose interpolation gap in nanoseconds.
+        #[arg(long, default_value_t = 200_000_000)]
+        pose_max_gap_ns: i64,
+        /// Output setup JSON.
+        #[arg(long, default_value = "cam-demo-out/setup.json")]
+        out_setup: PathBuf,
+        /// Output inputs JSONL.
+        #[arg(long, default_value = "cam-demo-out/inputs.jsonl")]
+        out_inputs: PathBuf,
+        /// Output truth JSONL.
+        #[arg(long, default_value = "cam-demo-out/truth.jsonl")]
+        out_truth: PathBuf,
+    },
+    /// Replay camera+LiDAR inputs in a given mode.
+    Replay {
+        /// Setup JSON.
+        #[arg(long)]
+        setup: PathBuf,
+        /// Inputs JSONL.
+        #[arg(long)]
+        inputs: PathBuf,
+        /// Mode: lidar_only | camera_associated | camera_assisted.
+        #[arg(long, default_value = "camera_assisted")]
+        mode: String,
+        /// Output records JSONL.
+        #[arg(long)]
+        output: PathBuf,
+        /// Diagnostics JSON.
+        #[arg(long, default_value = "cam-demo-out/diagnostics.json")]
+        diagnostics: PathBuf,
+        /// Extra LiDAR arrival delay (ns).
+        #[arg(long, default_value_t = 0)]
+        lidar_delay_ns: i64,
+        /// Extra camera arrival delay (ns).
+        #[arg(long, default_value_t = 0)]
+        camera_delay_ns: i64,
+        /// Duplicate every N-th batch.
+        #[arg(long, default_value_t = 0)]
+        duplicate_every: u64,
+        /// Reverse arrival order in windows of this size.
+        #[arg(long, default_value_t = 0)]
+        reverse_window: usize,
+        /// Pause a sensor: lidar | camera.
+        #[arg(long)]
+        pause_sensor: Option<String>,
+        /// Pause start event time (ns).
+        #[arg(long, default_value_t = 0)]
+        pause_start_ns: i64,
+        /// Pause end event time (ns).
+        #[arg(long, default_value_t = 0)]
+        pause_end_ns: i64,
+    },
+    /// Evaluate replay outputs against ground truth.
+    Evaluate {
+        /// Output records JSONL.
+        #[arg(long)]
+        output: PathBuf,
+        /// Truth JSONL.
+        #[arg(long)]
+        truth: PathBuf,
+        /// Metrics JSON output.
+        #[arg(long, default_value = "cam-demo-out/metrics.json")]
+        metrics: PathBuf,
+    },
+    /// Render an HTML report for one mode plus optional comparison metrics.
+    Report {
+        /// Setup JSON.
+        #[arg(long)]
+        setup: PathBuf,
+        /// Output records JSONL.
+        #[arg(long)]
+        output: PathBuf,
+        /// Truth JSONL.
+        #[arg(long)]
+        truth: PathBuf,
+        /// Optional comparison metrics JSON.
+        #[arg(long)]
+        metrics: Option<PathBuf>,
+        /// Optional diagnostics JSON.
+        #[arg(long)]
+        diagnostics: Option<PathBuf>,
+        /// HTML output.
+        #[arg(long, default_value = "cam-demo-out/report.html")]
+        html: PathBuf,
+        /// Report title.
+        #[arg(long, default_value = "perception-engine report")]
+        title: String,
+    },
+    /// Run the full synthetic camera+LiDAR demo (fixture, 3 modes, report).
+    CamDemo {
+        /// Output directory.
+        #[arg(long, default_value = "cam-demo-out")]
+        out_dir: PathBuf,
+        /// Deterministic seed.
+        #[arg(long, default_value_t = 42)]
+        seed: u64,
+        /// Extra LiDAR arrival delay (ns).
+        #[arg(long, default_value_t = 0)]
+        lidar_delay_ns: i64,
+        /// Extra camera arrival delay (ns).
+        #[arg(long, default_value_t = 0)]
+        camera_delay_ns: i64,
+        /// Duplicate every N-th batch.
+        #[arg(long, default_value_t = 0)]
+        duplicate_every: u64,
+        /// Reverse arrival order in windows of this size.
+        #[arg(long, default_value_t = 0)]
+        reverse_window: usize,
+        /// Pause a sensor: lidar | camera.
+        #[arg(long)]
+        pause_sensor: Option<String>,
+        /// Pause start event time (ns).
+        #[arg(long, default_value_t = 0)]
+        pause_start_ns: i64,
+        /// Pause end event time (ns).
+        #[arg(long, default_value_t = 0)]
+        pause_end_ns: i64,
     },
 }
 
@@ -204,6 +365,108 @@ fn run(cli: Cli) -> CliResult<()> {
             Ok(())
         }
         Command::Demo { out_dir, seed } => run_demo(&out_dir, seed),
+        Command::CamFixture { out_dir, seed } => cam::run_fixture(&out_dir, seed),
+        Command::Prepare {
+            calib,
+            times,
+            poses,
+            lidar_detections,
+            camera_detections,
+            lidar_labels,
+            image_width,
+            image_height,
+            near_plane,
+            default_covariance,
+            pose_max_gap_ns,
+            out_setup,
+            out_inputs,
+            out_truth,
+        } => cam::run_prepare(
+            &calib,
+            &times,
+            poses.as_deref(),
+            &lidar_detections,
+            &camera_detections,
+            lidar_labels.as_deref(),
+            None,
+            image_width,
+            image_height,
+            near_plane,
+            default_covariance,
+            pose_max_gap_ns,
+            &out_setup,
+            &out_inputs,
+            &out_truth,
+        ),
+        Command::Replay {
+            setup,
+            inputs,
+            mode,
+            output,
+            diagnostics,
+            lidar_delay_ns,
+            camera_delay_ns,
+            duplicate_every,
+            reverse_window,
+            pause_sensor,
+            pause_start_ns,
+            pause_end_ns,
+        } => {
+            let injection = cam::injection_from_flags(
+                lidar_delay_ns,
+                camera_delay_ns,
+                duplicate_every,
+                reverse_window,
+                pause_sensor.as_deref(),
+                pause_start_ns,
+                pause_end_ns,
+            )?;
+            cam::run_replay(&setup, &inputs, &mode, &output, &diagnostics, injection)
+        }
+        Command::Evaluate {
+            output,
+            truth,
+            metrics,
+        } => cam::run_evaluate(&output, &truth, &metrics),
+        Command::Report {
+            setup,
+            output,
+            truth,
+            metrics,
+            diagnostics,
+            html,
+            title,
+        } => cam::run_report(
+            &setup,
+            &output,
+            &truth,
+            metrics.as_deref(),
+            &html,
+            &title,
+            diagnostics.as_deref(),
+        ),
+        Command::CamDemo {
+            out_dir,
+            seed,
+            lidar_delay_ns,
+            camera_delay_ns,
+            duplicate_every,
+            reverse_window,
+            pause_sensor,
+            pause_start_ns,
+            pause_end_ns,
+        } => {
+            let injection = cam::injection_from_flags(
+                lidar_delay_ns,
+                camera_delay_ns,
+                duplicate_every,
+                reverse_window,
+                pause_sensor.as_deref(),
+                pause_start_ns,
+                pause_end_ns,
+            )?;
+            cam::run_demo(&out_dir, seed, injection)
+        }
     }
 }
 

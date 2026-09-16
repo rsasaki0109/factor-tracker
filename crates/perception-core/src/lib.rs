@@ -64,11 +64,13 @@ pub use assignment::{linear_assignment, Assignment};
 pub use error::{InputError, NumericError, TrackerError};
 pub use filter::KalmanFilter;
 pub use tracker::{
-    BBox2DTracker, BBox2DTrackerConfig, Cartesian3DTracker, Cartesian3DTrackerConfig,
-    Track2DSnapshot, Track3DSnapshot,
+    BBox2DTracker, BBox2DTrackerConfig, BatchReport3D, Cartesian3DTracker,
+    Cartesian3DTrackerConfig, ObservationAssociation, ObservationOutcome, Track2DSnapshot,
+    Track3DSnapshot,
 };
 pub use transform::{transform_covariance, transform_position, RigidTransform3D};
 pub use types::{
-    BBox2D, BBox2DObservation, ClassLabel, FrameId, ObservationBatch2D, ObservationBatch3D,
-    Position3DObservation, SensorId, Timestamp, TrackId, TrackLifecycleState, TrackerConfig,
+    BBox2D, BBox2DObservation, ClassLabel, ClassPrior, FrameId, ObservationBatch2D,
+    ObservationBatch3D, Position3DObservation, SensorId, Timestamp, TrackId, TrackLifecycleState,
+    TrackerConfig,
 };

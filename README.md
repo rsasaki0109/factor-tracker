@@ -84,12 +84,57 @@ Future work is listed in [`ROADMAP.md`](ROADMAP.md).
 
 ```
 perception-engine/
-  crates/perception-core/   library (types, filter, assignment, lifecycle, trackers)
-  crates/perception-cli/    CLI, JSONL schema, synthetic scenarios, HTML rendering
-  docs/                     architecture, data format, algorithms
-  assets/                   reserved for demo assets
-  .github/workflows/        CI
+  crates/perception-core/    tracking core (types, filter, assignment, lifecycle, trackers)
+  crates/perception-engine/  camera-assisted LiDAR SDK (calibration, projection, async, eval, KITTI)
+  crates/perception-cli/     CLI, JSONL schemas, scenarios, reports
+  docs/                      architecture, data format, algorithms, camera-lidar, datasets, evaluation
+  assets/                    demo assets (hero image)
+  .github/workflows/         CI
 ```
+
+## Camera-assisted LiDAR tracking (SDK)
+
+`perception-engine` (the crate) turns sensor-native detections, calibration and
+timestamps into common-frame 3D tracks plus association diagnostics, for one
+camera and one LiDAR. You do not assemble the pipeline yourself:
+
+```
+sensor detections
+    -> bounded arrival-order reorder buffer (event time preserved)
+    -> per-observation coordinate normalization (calibration + ego pose at event time)
+    -> LiDAR position tracking (perception-core)
+    -> geometric camera association (projected 3D boxes vs 2D detections)
+    -> camera class evidence as a soft prior (camera-assisted mode)
+    -> unified track output, diagnostics, comparison and HTML report
+```
+
+It is **Camera-assisted LiDAR tracking**: the LiDAR tracks objects; the camera
+associates and augments. 3D box shape is projection metadata, not an estimated
+state. The camera never creates a 3D position from a 2D box, never updates the
+position covariance, never deletes an out-of-view track, and never keeps an old
+position valid indefinitely.
+
+Run the end-to-end synthetic demo (fixture, three modes, evaluation, report):
+
+```sh
+cargo run -p perception-cli -- cam-demo --out-dir cam-demo-out
+```
+
+This writes setup, inputs, truth, `comparison.json` and a local `report.html`.
+The camera panel shows 2D detections and projected tracks; the second panel is
+a top-down XY view of LiDAR observations and tracks. Select a frame to see why a
+detection was associated or why an observation was rejected.
+
+The three modes are `lidar_only`, `camera_associated` and `camera_assisted`;
+they share the same LiDAR input, transforms, filter settings and evaluation
+interval. The camera does not update position, so position metrics are not
+expected to improve.
+
+Real KITTI data uses the same `replay`/`evaluate`/`report` path after
+`prepare`; see [`docs/datasets.md`](docs/datasets.md) and
+[`docs/camera-lidar.md`](docs/camera-lidar.md). **No real dataset was downloaded
+in this environment**, so the reported demo numbers come from the synthetic
+fixture only.
 
 ## Requirements
 

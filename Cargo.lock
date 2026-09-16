@@ -424,6 +424,7 @@ dependencies = [
  "clap",
  "nalgebra",
  "perception-core",
+ "perception-engine",
  "serde",
  "serde_json",
 ]
@@ -435,6 +436,18 @@ dependencies = [
  "approx",
  "criterion",
  "nalgebra",
+ "thiserror",
+]
+
+[[package]]
+name = "perception-engine"
+version = "0.1.0"
+dependencies = [
+ "approx",
+ "nalgebra",
+ "perception-core",
+ "serde",
+ "serde_json",
  "thiserror",
 ]
 

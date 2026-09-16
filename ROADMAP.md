@@ -28,16 +28,32 @@ each group.
   (MHT).
 - Learned or adaptive gating thresholds.
 
-## Sensor adapters and integration
+## Implemented in the camera-assisted LiDAR SDK
 
-- Camera / LiDAR / radar adapters that convert sensor-native data into
-  observation batches.
-- Fusing 2D image boxes with 3D object observations through a calibrated
-  projection model (currently deliberately excluded).
-- Ego-motion estimation and compensation for moving platforms.
+- Camera / LiDAR adapter (KITTI text formats) that converts sensor-native data
+  into observation batches.
+- Camera 2D box to LiDAR 3D track association through a calibrated rectified
+  pinhole projection, with per-association diagnostics.
+- Camera intrinsics and sensor-to-sensor extrinsics.
+- Coordinate normalization with externally supplied ego poses (interpolated,
+  never extrapolated).
+- Bounded, event-time-preserving asynchronous reordering with late / duplicate
+  / overflow handling and deterministic same-time order.
+- Camera class evidence as a soft association prior.
+- Three-mode comparison (lidar-only / camera-associated / camera-assisted) and
+  a local HTML report.
+
+## Not yet implemented
+
+- Ego-motion **estimation** (poses are an external input; none is estimated or
+  evaluated here).
+- Radar adapters and radar observation models.
+- Camera distortion models other than a rectified pinhole.
+- Non-linear (EKF/UKF) camera updates.
 - ROS 2 adapter.
 - Python bindings.
 - Wasm bindings.
+- More than one dataset.
 
 ## Performance
 

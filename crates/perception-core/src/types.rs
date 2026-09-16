@@ -165,6 +165,20 @@ impl ClassLabel {
     }
 }
 
+/// A soft class belief supplied by an external (non-positional) source.
+///
+/// This is used by the engine layer to feed camera-derived class evidence into
+/// the LiDAR association as a *soft* cost, never as a hard gate. `confidence`
+/// is in `[0, 1]` and only scales the penalty; it is not a calibrated
+/// probability.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ClassPrior {
+    /// The believed class.
+    pub label: ClassLabel,
+    /// Evidence strength in `[0, 1]`.
+    pub confidence: f64,
+}
+
 /// An axis-aligned 2D bounding box on an image plane, in pixels.
 ///
 /// Corners are inclusive/exclusive in the usual image convention; only the
