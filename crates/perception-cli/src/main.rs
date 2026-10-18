@@ -201,6 +201,12 @@ enum Command {
         /// Override the matching-cascade window in nanoseconds (0 disables it).
         #[arg(long)]
         recent_track_window_ns: Option<i64>,
+        /// Weight of the appearance (ReID) cost; 0 disables it.
+        #[arg(long)]
+        appearance_weight: Option<f64>,
+        /// Hard gate on the appearance cosine distance.
+        #[arg(long)]
+        appearance_max_distance: Option<f64>,
     },
     /// Evaluate replay outputs against ground truth.
     Evaluate {
@@ -433,6 +439,8 @@ fn run(cli: Cli) -> CliResult<()> {
             accel_spectral_density,
             gate_squared_mahalanobis,
             recent_track_window_ns,
+            appearance_weight,
+            appearance_max_distance,
         } => {
             let injection = cam::injection_from_flags(
                 lidar_delay_ns,
@@ -448,6 +456,8 @@ fn run(cli: Cli) -> CliResult<()> {
                 accel_spectral_density,
                 gate_squared_mahalanobis,
                 recent_track_window_ns,
+                appearance_weight,
+                appearance_max_distance,
             };
             cam::run_replay(
                 &setup,

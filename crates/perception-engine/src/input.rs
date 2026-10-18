@@ -26,6 +26,9 @@ pub struct LidarDetection {
     /// Optional oriented box metadata for projection. Not part of the tracked
     /// state.
     pub shape: Option<Box3DShape>,
+    /// Optional appearance embedding (e.g. a ReID feature of the detection's
+    /// image crop), used as an association cue by the tracker.
+    pub appearance: Option<Vec<f32>>,
 }
 
 /// One LiDAR sensor's detections at one event time.

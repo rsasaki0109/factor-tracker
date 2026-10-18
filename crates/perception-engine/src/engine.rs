@@ -450,6 +450,7 @@ impl CameraAssistedLidarEngine {
                 position,
                 covariance,
                 class_label: detection.class_label,
+                appearance: detection.appearance.clone(),
             });
         }
 

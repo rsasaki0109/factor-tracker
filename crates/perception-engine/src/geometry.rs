@@ -297,21 +297,34 @@ impl PoseTrack {
                     reason: "pose timestamp difference overflowed".to_string(),
                 })?;
         let s = elapsed as f64 / gap as f64;
-        Ok(interpolate_pose(p0, p1, s))
+        interpolate_pose(p0, p1, s)
     }
 }
 
-fn interpolate_pose(a: &RigidTransform3D, b: &RigidTransform3D, s: f64) -> RigidTransform3D {
+fn interpolate_pose(
+    a: &RigidTransform3D,
+    b: &RigidTransform3D,
+    s: f64,
+) -> EngineResult<RigidTransform3D> {
     let translation = a.translation() + (b.translation() - a.translation()) * s;
-    let qa = UnitQuaternion::from_rotation_matrix(&nalgebra::Rotation3::from_matrix_unchecked(
-        *a.rotation(),
-    ));
-    let qb = UnitQuaternion::from_rotation_matrix(&nalgebra::Rotation3::from_matrix_unchecked(
-        *b.rotation(),
-    ));
-    let q = qa.slerp(&qb, s);
-    let rotation = q.to_rotation_matrix().into_inner();
-    RigidTransform3D::new(rotation, translation).expect("interpolated rotation is orthonormal")
+    // `from_rotation_matrix` can return a quaternion whose norm is off by
+    // ~1e-9, which is enough to fail the core's orthonormality check after
+    // conversion back; renormalize and re-orthonormalize instead of trusting it.
+    let quaternion = |r: &Matrix3<f64>| {
+        UnitQuaternion::new_normalize(
+            UnitQuaternion::from_rotation_matrix(&nalgebra::Rotation3::from_matrix_unchecked(*r))
+                .into_inner(),
+        )
+    };
+    let q = UnitQuaternion::new_normalize(
+        quaternion(a.rotation())
+            .slerp(&quaternion(b.rotation()), s)
+            .into_inner(),
+    );
+    let rotation = orthonormalize_rotation(&q.to_rotation_matrix().into_inner())?;
+    RigidTransform3D::new(rotation, translation).map_err(|error| EngineError::PoseUnavailable {
+        reason: format!("interpolated pose is invalid: {error}"),
+    })
 }
 
 /// Box dimensions in metres, KITTI ordering (`height`, `width`, `length`).

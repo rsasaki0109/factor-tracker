@@ -82,6 +82,17 @@ pub struct Cartesian3DTrackerConfig {
     /// place, so two tracks on one object can take the observation from each
     /// other in turn. `None` keeps a single assignment over all tracks.
     pub recent_track_window_ns: Option<i64>,
+    /// Weight of the appearance term added to the association cost:
+    /// `appearance_weight * (1 - cos(track, observation))`, applied when both
+    /// the track and the observation carry an embedding. `0.0` disables it.
+    /// The spatial gate always applies first.
+    pub appearance_weight: f64,
+    /// Exponential moving average factor for a track's embedding: the new
+    /// embedding is `momentum * old + (1 - momentum) * observed`.
+    pub appearance_momentum: f64,
+    /// Optional hard gate on the cosine distance `1 - cos`; pairs above it are
+    /// never associated (only when both embeddings exist).
+    pub appearance_max_distance: Option<f64>,
 }
 
 impl Default for Cartesian3DTrackerConfig {
@@ -94,6 +105,9 @@ impl Default for Cartesian3DTrackerConfig {
             gate_squared_mahalanobis: DEFAULT_GATE_SQUARED_MAHALANOBIS,
             class_prior_penalty: 8.0,
             recent_track_window_ns: None,
+            appearance_weight: 0.0,
+            appearance_momentum: 0.9,
+            appearance_max_distance: None,
         }
     }
 }
@@ -120,6 +134,21 @@ impl Cartesian3DTrackerConfig {
         if !self.class_prior_penalty.is_finite() || self.class_prior_penalty < 0.0 {
             return Err(InputError::InvalidConfig {
                 reason: "class_prior_penalty must be finite and >= 0",
+            });
+        }
+        if !self.appearance_weight.is_finite() || self.appearance_weight < 0.0 {
+            return Err(InputError::InvalidConfig {
+                reason: "appearance_weight must be finite and >= 0",
+            });
+        }
+        if !(0.0..1.0).contains(&self.appearance_momentum) {
+            return Err(InputError::InvalidConfig {
+                reason: "appearance_momentum must be in [0, 1)",
+            });
+        }
+        if matches!(self.appearance_max_distance, Some(d) if !d.is_finite() || d <= 0.0) {
+            return Err(InputError::InvalidConfig {
+                reason: "appearance_max_distance must be finite and > 0",
             });
         }
         if matches!(self.recent_track_window_ns, Some(window) if window <= 0) {
@@ -225,6 +254,30 @@ struct Track3D {
     last_update_sensor: Option<SensorId>,
     contributing_sensors: Vec<SensorId>,
     updated_this_batch: bool,
+    /// Unit-norm appearance embedding (EMA of associated observations).
+    appearance: Option<Vec<f32>>,
+}
+
+/// Unit-norm copy of an embedding; `None` for missing, empty, non-finite or
+/// zero vectors.
+fn normalized(vector: Option<&[f32]>) -> Option<Vec<f32>> {
+    let vector = vector?;
+    if vector.is_empty() || !vector.iter().all(|v| v.is_finite()) {
+        return None;
+    }
+    let norm = vector.iter().map(|v| v * v).sum::<f32>().sqrt();
+    (norm > 0.0).then(|| vector.iter().map(|v| v / norm).collect())
+}
+
+/// Cosine distance `1 - cos` between a unit-norm track embedding and an
+/// observation embedding; `None` when either is missing or the sizes differ.
+fn cosine_distance(track: Option<&[f32]>, observation: Option<&[f32]>) -> Option<f64> {
+    let (track, observation) = (track?, normalized(observation)?);
+    if track.len() != observation.len() {
+        return None;
+    }
+    let cos: f32 = track.iter().zip(&observation).map(|(a, b)| a * b).sum();
+    Some(f64::from(1.0 - cos.clamp(-1.0, 1.0)))
 }
 
 /// Assigns the rows flagged `first` before the others: stage one solves
@@ -489,10 +542,27 @@ impl Cartesian3DTracker {
                     &h,
                     &observation.covariance,
                 )?;
+                let appearance_distance = if self.config.appearance_weight > 0.0 {
+                    cosine_distance(
+                        track.appearance.as_deref(),
+                        observation.appearance.as_deref(),
+                    )
+                } else {
+                    None
+                };
+                if matches!(
+                    (appearance_distance, self.config.appearance_max_distance),
+                    (Some(d), Some(max)) if d > max
+                ) {
+                    continue;
+                }
                 if let Some(mut cost) = mahalanobis_association_cost(
                     squared_distance,
                     self.config.gate_squared_mahalanobis,
                 ) {
+                    if let Some(d) = appearance_distance {
+                        cost += self.config.appearance_weight * d;
+                    }
                     // Soft class prior (e.g. camera evidence): only penalize,
                     // never forbid. The spatial gate above has already applied.
                     if let (Some(prior), Some(observed)) =
@@ -551,6 +621,20 @@ impl Cartesian3DTracker {
                 .filter
                 .update(&observation.position, &h, &observation.covariance)?;
             self.apply_observation(i, observation.class_label, batch);
+            if let Some(observed) = normalized(observation.appearance.as_deref()) {
+                let momentum = self.config.appearance_momentum as f32;
+                let track = &mut self.tracks[i];
+                track.appearance = match track.appearance.take() {
+                    Some(old) if old.len() == observed.len() => normalized(Some(
+                        &old.iter()
+                            .zip(&observed)
+                            .map(|(a, b)| momentum * a + (1.0 - momentum) * b)
+                            .collect::<Vec<f32>>(),
+                    ))
+                    .or(Some(observed)),
+                    _ => Some(observed),
+                };
+            }
             self.tracks[i].updated_this_batch = true;
             associations[j] = ObservationAssociation {
                 observation_index: j,
@@ -655,6 +739,7 @@ impl Cartesian3DTracker {
             last_update_sensor: Some(sensor),
             contributing_sensors,
             updated_this_batch: true,
+            appearance: normalized(observation.appearance.as_deref()),
         });
         Ok(id)
     }
@@ -749,7 +834,61 @@ mod tests {
             position: Vector3::new(x, y, z),
             covariance: Matrix3::identity(),
             class_label: None,
+            appearance: None,
         }
+    }
+
+    fn with_appearance(
+        mut observation: Position3DObservation,
+        appearance: &[f32],
+    ) -> Position3DObservation {
+        observation.appearance = Some(appearance.to_vec());
+        observation
+    }
+
+    #[test]
+    fn appearance_breaks_a_spatial_tie_between_neighbours() {
+        let run = |weight: f64| {
+            let mut config = config();
+            config.appearance_weight = weight;
+            let mut tracker = Cartesian3DTracker::new(config).unwrap();
+            // Two neighbours with different appearance.
+            tracker
+                .process_batch(&batch(
+                    1,
+                    0,
+                    0,
+                    vec![
+                        with_appearance(observation(0.0, 0.0, 0.0), &[1.0, 0.0]),
+                        with_appearance(observation(0.6, 0.0, 0.0), &[0.0, 2.0]),
+                    ],
+                ))
+                .unwrap();
+            // One observation, spatially closer to the first track but looking
+            // like the second.
+            let (_, report) = tracker
+                .process_batch_reported(&batch(
+                    1,
+                    1,
+                    100_000_000,
+                    vec![with_appearance(observation(0.2, 0.0, 0.0), &[0.0, 1.0])],
+                ))
+                .unwrap();
+            report.associations[0].track_id
+        };
+        assert_eq!(run(0.0), Some(TrackId::new(1)));
+        assert_eq!(run(10.0), Some(TrackId::new(2)));
+    }
+
+    #[test]
+    fn appearance_is_ignored_when_missing_or_mismatched() {
+        assert_eq!(cosine_distance(None, Some(&[1.0])), None);
+        assert_eq!(cosine_distance(Some(&[1.0, 0.0]), Some(&[1.0])), None);
+        assert_eq!(cosine_distance(Some(&[1.0, 0.0]), Some(&[0.0, 0.0])), None);
+        assert!((cosine_distance(Some(&[1.0, 0.0]), Some(&[3.0, 0.0])).unwrap()).abs() < 1e-6);
+        assert!(
+            (cosine_distance(Some(&[1.0, 0.0]), Some(&[0.0, -1.0])).unwrap() - 1.0).abs() < 1e-6
+        );
     }
 
     fn batch(

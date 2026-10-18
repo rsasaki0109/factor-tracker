@@ -39,6 +39,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 position: Vector3::new(step as f64, 0.0, 1.0),
                 covariance: Matrix3::<f64>::identity() * 0.09,
                 class_label: None,
+                appearance: None,
             }],
         })?;
 
@@ -59,6 +60,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 position: world_position,
                 covariance: world_covariance,
                 class_label: None,
+                appearance: None,
             }],
         })?;
 

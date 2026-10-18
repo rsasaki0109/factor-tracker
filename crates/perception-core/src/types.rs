@@ -337,6 +337,11 @@ pub struct Position3DObservation {
     pub covariance: Matrix3<f64>,
     /// Optional detector class.
     pub class_label: Option<ClassLabel>,
+    /// Optional appearance embedding (for example a ReID feature of the
+    /// object's image crop). Compared by cosine distance; the vector does not
+    /// need to be normalized. Ignored unless
+    /// `Cartesian3DTrackerConfig::appearance_weight` is positive.
+    pub appearance: Option<Vec<f32>>,
 }
 
 /// A batch of 2D observations from one sensor at one timestamp.

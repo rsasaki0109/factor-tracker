@@ -388,6 +388,7 @@ pub fn generate_3d(seed: u64) -> Scenario3d {
                         + Vector3::new(rng.normal(), rng.normal(), rng.normal()) * 0.15,
                     covariance: Matrix3::<f64>::identity() * (0.15 * 0.15),
                     class_label: Some(perception_core::ClassLabel::new(object.class)),
+                    appearance: None,
                 });
             }
 
@@ -408,6 +409,7 @@ pub fn generate_3d(seed: u64) -> Scenario3d {
                     position: world,
                     covariance,
                     class_label: Some(perception_core::ClassLabel::new(object.class)),
+                    appearance: None,
                 });
             }
 
@@ -426,6 +428,7 @@ pub fn generate_3d(seed: u64) -> Scenario3d {
                 position: Vector3::new(rng.next_f64() * 30.0, rng.next_f64() * 20.0, 0.0),
                 covariance: Matrix3::<f64>::identity() * 1.0,
                 class_label: None,
+                appearance: None,
             });
         }
 

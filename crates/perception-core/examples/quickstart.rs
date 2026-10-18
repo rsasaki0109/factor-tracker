@@ -55,6 +55,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 position: Vector3::new(1.0, 2.0, 3.0),
                 covariance: Matrix3::<f64>::identity() * sigma * sigma,
                 class_label: None,
+                appearance: None,
             }],
         })?;
         for track in tracks {

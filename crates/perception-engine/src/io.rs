@@ -55,6 +55,9 @@ pub struct LidarDetectionRecord {
     /// Optional projection shape metadata.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shape: Option<ShapeMetadataRecord>,
+    /// Optional appearance embedding (any length; compared by cosine).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub appearance: Option<Vec<f32>>,
 }
 
 /// A camera detection record.
@@ -244,6 +247,7 @@ impl EngineInputRecord {
                             class_label: record.class.map(ClassLabel::new),
                             score: record.score,
                             shape,
+                            appearance: record.appearance.clone(),
                         })
                     })
                     .collect::<EngineResult<Vec<_>>>()?;

@@ -163,6 +163,7 @@ pub fn generate(seed: u64) -> EngineResult<FixtureData> {
                     covariance: vec![0.01, 0.0, 0.0, 0.0, 0.01, 0.0, 0.0, 0.0, 0.01],
                     class: Some(object.class),
                     score: 0.9,
+                    appearance: None,
                     shape: Some(ShapeMetadataRecord {
                         height: object.dimensions.height,
                         width: object.dimensions.width,
@@ -216,6 +217,7 @@ pub fn generate(seed: u64) -> EngineResult<FixtureData> {
                 covariance: vec![0.25, 0.0, 0.0, 0.0, 0.25, 0.0, 0.0, 0.0, 0.25],
                 class: None,
                 score: 0.4,
+                appearance: None,
                 shape: None,
             });
         }

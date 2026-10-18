@@ -470,6 +470,7 @@ pub fn to_lidar_detection(
         class_label: object.class_id.map(ClassLabel::new),
         score: object.score,
         shape: Some(shape),
+        appearance: None,
     })
 }
 
@@ -600,6 +601,7 @@ pub fn prepare_sequence(
                         covariance: row_major_3(&detection.covariance),
                         class: detection.class_label.map(ClassLabel::value),
                         score: detection.score,
+                        appearance: None,
                         shape: detection.shape.as_ref().map(|shape| ShapeMetadataRecord {
                             height: shape.dimensions.height,
                             width: shape.dimensions.width,

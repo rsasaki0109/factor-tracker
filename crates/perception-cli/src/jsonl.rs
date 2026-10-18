@@ -396,6 +396,7 @@ impl ObservationRecord {
                                 &record.covariance,
                             )?,
                             class_label: record.class.map(perception_core::ClassLabel::new),
+                            appearance: None,
                         })
                     })
                     .collect::<CliResult<Vec<_>>>()?;
@@ -579,6 +580,7 @@ mod tests {
                 position: nalgebra::Vector3::new(1.0, 2.0, 3.0),
                 covariance: Matrix3::<f64>::identity(),
                 class_label: None,
+                appearance: None,
             }],
         };
         let record = record_from_batch_3d(&batch);

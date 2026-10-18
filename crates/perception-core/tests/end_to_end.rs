@@ -130,6 +130,7 @@ fn obs3d(position: Vector3<f64>, sigma: f64) -> Position3DObservation {
         position,
         covariance: Matrix3::identity() * sigma * sigma,
         class_label: Some(ClassLabel::new(1)),
+        appearance: None,
     }
 }
 
@@ -183,6 +184,7 @@ fn three_d_fuses_two_sensors_with_different_rates() {
                         position: world,
                         covariance,
                         class_label: Some(ClassLabel::new(1)),
+                        appearance: None,
                     }],
                 })
                 .unwrap();

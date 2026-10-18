@@ -101,6 +101,7 @@ fn make_batches_3d(objects: usize) -> Vec<ObservationBatch3D> {
                         position: Vector3::new(x, y, 0.0),
                         covariance: Matrix3::<f64>::identity() * 0.25,
                         class_label: None,
+                        appearance: None,
                     }
                 })
                 .collect();

@@ -51,6 +51,7 @@ fn lidar_detection(position: Vector3<f64>, class: Option<u32>) -> LidarDetection
         class_label: class.map(ClassLabel::new),
         score: 0.9,
         shape: Some(shape()),
+        appearance: None,
     }
 }
 
@@ -559,4 +560,54 @@ fn ground_truth_types_are_not_part_of_the_engine_api() {
     // truth is only consumed by `evaluate_mode`.
     let _truth: fn() -> Vec<perception_engine::GroundTruthFrame> = Vec::new;
     let _ = BBox2D::from_corners(0.0, 0.0, 1.0, 1.0);
+}
+
+#[test]
+fn pose_interpolation_tolerates_quaternion_round_off() {
+    // Two consecutive ANYmal odometry poses (GrandTour ETH-2) for which
+    // nalgebra's matrix-to-quaternion conversion is ~1e-9 off unit norm.
+    let a = perception_engine::geometry::rigid_from_row_major_3x4(&[
+        0.057033789423095005,
+        -0.9976222255424496,
+        0.0386916265847297,
+        212.23496032753766,
+        0.9983485693585292,
+        0.056722675096575914,
+        -0.009092424850756928,
+        18.723403884330317,
+        0.006876112551465939,
+        0.03914630549130271,
+        0.999209830737549,
+        11.38204340007836,
+    ])
+    .unwrap();
+    let b = perception_engine::geometry::rigid_from_row_major_3x4(&[
+        0.057326996194461355,
+        -0.9976248170416008,
+        0.03818821716227578,
+        212.23314465539505,
+        0.9983332253902616,
+        0.05702850509836954,
+        -0.008861189994730146,
+        18.72550315854963,
+        0.006662326110127036,
+        0.03863255141662481,
+        0.9992312742212608,
+        11.38358516927335,
+    ])
+    .unwrap();
+    let track = PoseTrack::new(
+        vec![
+            (Timestamp::from_nanos(1_727_776_473_248_179_200), a),
+            (Timestamp::from_nanos(1_727_776_473_298_179_072), b),
+        ],
+        200_000_000,
+    )
+    .unwrap();
+    for offset in [0, 1, 12_500_000, 25_000_000, 49_999_871] {
+        let pose = track
+            .pose_at(Timestamp::from_nanos(1_727_776_473_248_179_200 + offset))
+            .unwrap();
+        assert!((pose.rotation().determinant() - 1.0).abs() < 1e-12);
+    }
 }
