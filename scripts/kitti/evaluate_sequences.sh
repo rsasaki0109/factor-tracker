@@ -11,6 +11,8 @@
 # REPLAY_ARGS="" for the library defaults.
 set -euo pipefail
 REPLAY_ARGS=${REPLAY_ARGS---initial-velocity-variance 100}
+# EVAL_ARGS is passed to every `evaluate` call, e.g. "--match-distance-m 1".
+EVAL_ARGS=${EVAL_ARGS:-}
 
 if [[ $# -lt 2 ]]; then
   echo "usage: $0 <converted-root> <results-dir> [sequence ...]" >&2
@@ -54,7 +56,7 @@ for seq in "${sequences[@]}"; do
       --output "$out/$mode.outputs.jsonl" --diagnostics "$out/$mode.diagnostics.json" \
       $REPLAY_ARGS > "$out/$mode.replay.log"
     "$cli" evaluate --output "$out/$mode.outputs.jsonl" --truth "$out/truth.jsonl" \
-      --metrics "$out/$mode.metrics.json" > /dev/null
+      --metrics "$out/$mode.metrics.json" $EVAL_ARGS > /dev/null
   done
   "$cli" report --setup "$out/setup.json" --output "$out/camera_assisted.outputs.jsonl" \
     --truth "$out/truth.jsonl" --metrics "$out/camera_assisted.metrics.json" \

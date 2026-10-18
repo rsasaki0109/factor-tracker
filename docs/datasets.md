@@ -168,9 +168,12 @@ JSONL directly:
 - camera: stereo-rectified cam0, intrinsics from the rectified projection
   matrix, `camera_to_reference = inverse(R_rect * T_os1_cam0)`; LiDAR and
   camera share the LiDAR timestamp (hardware trigger);
-- LiDAR detections: the CODa 3D boxes of dynamic classes (pedestrian,
-  vehicles, scooter/segway/skateboard) as oracle detections, position at the
-  box centre, shape as explicit corners; static classes are dropped;
+- LiDAR detections: `--lidar-detections` reads per-frame detector output
+  (CODa-style JSON with scores, from `scripts/coda/detect_lidar_cpu.py`, which
+  runs the first stage of the published CODa PV-RCNN checkpoint on CPU);
+  without it the CODa 3D boxes are used as oracle detections. Only dynamic
+  classes (pedestrian, vehicles, scooter/segway/skateboard) are kept, position
+  at the box centre, shape as explicit corners;
 - camera detections: per-frame KITTI 2D files, e.g. from
   `scripts/runpod/detect_camera_yolo.py --image-dir ... --out-dir ...`;
 - ground truth: the same boxes, instance ids made unique across classes.
@@ -178,7 +181,11 @@ JSONL directly:
 ```sh
 python3 scripts/coda/fetch_coda.py --coda-root CODa --sequence 20 --first 8640 --last 8800
 python3 scripts/runpod/detect_camera_yolo.py --image-dir CODa/2d_rect/cam0/20 --out-dir det/coda20
+curl -O https://web.corral.tacc.utexas.edu/texasrobotics/web_CODa/pretrained_models/128channel/coda128_allclass_bestoracle.pth
+python3 scripts/coda/detect_lidar_cpu.py --ckpt coda128_allclass_bestoracle.pth --coda-root CODa \
+    --sequence 20 --first 8640 --last 8800 --out det/coda20_lidar
 python3 scripts/coda/convert_coda.py --coda-root CODa --sequence 20 --first 8640 --last 8800 \
-    --camera-detections det/coda20 --out coda-seq/20
-scripts/kitti/evaluate_sequences.sh coda-seq coda-results 20
+    --camera-detections det/coda20 --lidar-detections det/coda20_lidar --out coda-seq/20
+REPLAY_ARGS="--initial-velocity-variance 1 --accel-spectral-density 0.5" \
+EVAL_ARGS="--match-distance-m 1" scripts/kitti/evaluate_sequences.sh coda-seq coda-results 20
 ```

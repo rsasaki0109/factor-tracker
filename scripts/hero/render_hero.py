@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Renders the README hero GIF: engine tracks over real KITTI camera frames
+r"""Renders the README hero GIF: engine tracks over real KITTI camera frames
 and LiDAR scans.
 
 Inputs:
@@ -17,11 +17,15 @@ The README hero (CODa, robot) was produced with:
 
     python3 scripts/coda/fetch_coda.py --coda-root CODa --sequence 20 --first 8640 --last 8800
     python3 scripts/runpod/detect_camera_yolo.py --image-dir CODa/2d_rect/cam0/20 --out-dir det/coda20
+    python3 scripts/coda/detect_lidar_cpu.py --ckpt coda128_allclass_bestoracle.pth --coda-root CODa \
+        --sequence 20 --first 8640 --last 8800 --out det/coda20_lidar
     python3 scripts/coda/convert_coda.py --coda-root CODa --sequence 20 --first 8640 --last 8800 \
-        --camera-detections det/coda20 --out coda-seq/20
-    scripts/kitti/evaluate_sequences.sh coda-seq coda-res 20
+        --camera-detections det/coda20 --lidar-detections det/coda20_lidar --out coda-seq/20
+    REPLAY_ARGS="--initial-velocity-variance 1 --accel-spectral-density 0.5" \
+        EVAL_ARGS="--match-distance-m 1" scripts/kitti/evaluate_sequences.sh coda-seq coda-res 20
     python3 scripts/hero/render_hero.py coda-res/20 assets/hero.gif --dataset coda --data-root CODa \
-        --start 30 --frames 80 --width 840 --colors 128
+        --start 30 --frames 80 --width 840 --colors 128 \
+        --subtitle "CODa seq 20 · Clearpath Husky in a campus crowd · LiDAR: CODa PV-RCNN (first stage, run on CPU) · camera: YOLO11x · tracks: perception-engine"
 
 The earlier KITTI version:
 
@@ -343,7 +347,7 @@ PRESETS = {
     "coda": {
         "image_pattern": "{root}/2d_rect/cam0/{seq}/2d_rect_cam0_{seq}_{{frame}}.png",
         "scan_pattern": "{root}/3d_comp/os1/{seq}/3d_comp_os1_{seq}_{{frame}}.bin",
-        "subtitle": "CODa sequence {seq} · Clearpath Husky robot on a university campus · LiDAR: ground-truth boxes as oracle detections · camera: YOLO11x",
+        "subtitle": "CODa sequence {seq} · Clearpath Husky robot on a university campus · camera: YOLO11x · tracks: perception-engine",
         "attribution": "CODa (UT Campus Object Dataset): Zhang et al., CC BY-NC-SA 4.0",
         "lidar_name": "Ouster OS1-128",
         "ego_name": "robot",
@@ -389,6 +393,7 @@ def main():
     parser.add_argument("--bev-height", type=int)
     parser.add_argument("--width", type=int, default=760, help="scale the GIF to this width (0 = no scaling)")
     parser.add_argument("--canvas-width", type=int)
+    parser.add_argument("--subtitle", help="line under the title (default: dataset preset)")
     parser.add_argument("--label-range", type=float, help="label bird's-eye tracks within this range (m)")
     parser.add_argument("--min-tag-height", type=float, help="tag camera boxes at least this tall (px)")
     parser.add_argument("--colors", type=int, default=80)

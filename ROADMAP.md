@@ -23,10 +23,19 @@ each group.
 
 ## Association and track management
 
-- Appearance-assisted association (ReID) and feature embeddings.
+- Appearance-assisted association (ReID) and feature embeddings. Measured
+  need: on the CODa crowd window, real detections give 370 ID switches versus
+  31 with oracle detections, mostly neighbouring pedestrians exchanging tracks
+  (`docs/evaluation.md`).
 - Joint probabilistic data association (JPDA) and multiple hypothesis tracking
   (MHT).
 - Learned or adaptive gating thresholds.
+
+## Implemented since the initial version
+
+- Matching cascade for 3D association (`recent_track_window_ns`).
+- Real-dataset harness for KITTI tracking and CODa (`scripts/kitti`,
+  `scripts/coda`), including CPU inference of the CODa PV-RCNN first stage.
 
 ## Implemented in the camera-assisted LiDAR SDK
 
@@ -53,7 +62,7 @@ each group.
 - ROS 2 adapter.
 - Python bindings.
 - Wasm bindings.
-- More than one dataset.
+- More datasets (KITTI tracking and CODa are supported through scripts).
 
 ## Performance
 

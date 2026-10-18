@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Runs an OpenPCDet KITTI model over KITTI tracking velodyne scans.
+r"""Runs an OpenPCDet KITTI model over KITTI tracking velodyne scans.
 
 Writes one 16-field KITTI detection file per frame (camera 0 rectified frame,
 score last) to <out>/lidar/<seq>/<frame>.txt, the layout that

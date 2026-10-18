@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/hero.gif" alt="perception-engine on a Clearpath Husky robot driving through a campus crowd (CODa sequence 20): camera frames with YOLO detections and projected 3D track boxes (left), Ouster OS1-128 scan with pedestrian tracks, trails and uncertainty rings in a bird's-eye view around the robot (right)" width="100%">
+  <img src="assets/hero.gif" alt="perception-engine on a Clearpath Husky robot driving through a campus crowd (CODa sequence 20): camera frames with YOLO detections and projected 3D track boxes (left), Ouster OS1-128 scan with pedestrian tracks from a LiDAR detector, trails and uncertainty rings in a bird's-eye view around the robot (right)" width="100%">
 </p>
 
 <h1 align="center">perception-engine</h1>
@@ -11,7 +11,7 @@
   <img src="https://img.shields.io/badge/dependencies-nalgebra%20%7C%20thiserror-informational.svg" alt="Dependencies: nalgebra, thiserror">
 </p>
 
-<p align="center"><em>A Clearpath Husky robot driving through a crowd on the UT Austin campus (<a href="https://github.com/ut-amrl/coda-devkit">CODa</a> sequence 20): real camera frames and Ouster OS1-128 scans. Camera detections are YOLO11x (COCO) output; LiDAR detections are the CODa ground-truth 3D boxes used as oracle detections until a LiDAR detector is run (<code>scripts/runpod/</code>); boxes, IDs, trails and uncertainty rings are the engine's <code>camera_assisted</code> tracks in the world frame (CODa SLAM poses). The animation contains CODa data and is licensed under <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/">CC BY-NC-SA 4.0</a> (Zhang et al.), unlike the code. Rendered with <code>scripts/hero/render_hero.py</code>; the synthetic-demo image is <a href="assets/hero.svg"><code>assets/hero.svg</code></a>.</em></p>
+<p align="center"><em>A Clearpath Husky robot driving through a crowd on the UT Austin campus (<a href="https://github.com/ut-amrl/coda-devkit">CODa</a> sequence 20): real camera frames and Ouster OS1-128 scans. LiDAR detections come from the published CODa PV-RCNN checkpoint (first stage, run on CPU by <code>scripts/coda/detect_lidar_cpu.py</code>), camera detections from YOLO11x; boxes, IDs, trails and uncertainty rings are the engine's <code>camera_assisted</code> tracks in the world frame (CODa SLAM poses). Most frames shown are in CODa's training split, so detections are optimistic; tracking numbers are in <a href="docs/evaluation.md"><code>docs/evaluation.md</code></a>. The animation contains CODa data and is licensed under <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/">CC BY-NC-SA 4.0</a> (Zhang et al.), unlike the code. Rendered with <code>scripts/hero/render_hero.py</code>; the synthetic-demo image is <a href="assets/hero.svg"><code>assets/hero.svg</code></a>.</em></p>
 
 ---
 
@@ -28,11 +28,11 @@ independent tracker outputs.
 The core is CPU-only and has no GPU, ROS, Python, OpenCV or inference-engine
 dependency. Numeric work uses `f64`.
 
-> All data shipped in this repository is **synthetic**. The KITTI adapter has
-> been run on the real KITTI tracking calibration, poses and labels with oracle
-> (ground-truth) detections only; no detector-based accuracy, speed or benchmark
-> number is claimed beyond what is explicitly stated in `docs/algorithms.md`
-> and `docs/evaluation.md`.
+> All data shipped in this repository is **synthetic**, except the README
+> animation (CODa, see its caption). Real-data results (KITTI tracking with
+> oracle detections; CODa with oracle and with real LiDAR/camera detections)
+> are reported, with their caveats, in `docs/evaluation.md`; no other accuracy,
+> speed or benchmark number is claimed beyond `docs/algorithms.md`.
 
 ## What it is
 
@@ -91,7 +91,7 @@ perception-engine/
   crates/perception-engine/  camera-assisted LiDAR SDK (calibration, projection, async, eval, KITTI)
   crates/perception-cli/     CLI, JSONL schemas, scenarios, reports
   scripts/kitti/             KITTI tracking conversion and multi-sequence evaluation (Python + NumPy)
-  scripts/coda/              CODa (robot dataset) frame fetch and conversion to engine JSONL
+  scripts/coda/              CODa (robot dataset) frame fetch, CPU LiDAR detector, conversion to engine JSONL
   scripts/runpod/            GPU detector runs (OpenPCDet, Ultralytics) on a RunPod pod
   docs/                      architecture, data format, algorithms, camera-lidar, datasets, evaluation
   assets/                    demo assets (hero image)
@@ -142,9 +142,8 @@ Real KITTI data uses the same `replay`/`evaluate`/`report` path after
 KITTI tracking benchmark and evaluates every sequence; `scripts/coda/` does
 the same for the CODa robot dataset (Clearpath Husky, Ouster OS1-128); `scripts/runpod/` runs
 GPU detectors (OpenPCDet, Ultralytics) on a RunPod pod to produce the
-detections. The only real-data numbers so far use oracle detections
-([`docs/evaluation.md`](docs/evaluation.md)); the demo numbers come from the
-synthetic fixture.
+detections. Real-data numbers are in [`docs/evaluation.md`](docs/evaluation.md);
+the demo numbers come from the synthetic fixture.
 
 ## Requirements
 

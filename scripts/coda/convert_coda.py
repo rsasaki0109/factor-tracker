@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Converts a frame range of one CODa sequence (UT Campus Object Dataset,
+r"""Converts a frame range of one CODa sequence (UT Campus Object Dataset,
 Clearpath Husky robot) into engine JSONL: setup.json, inputs.jsonl and
 truth.jsonl, ready for `perception-cli replay` / `evaluate`.
 
@@ -11,8 +11,10 @@ Frames and conventions:
   projection matrix, `camera_to_reference = inverse(R_rect * T_os1_cam0)`.
   LiDAR and cam0 are hardware-triggered, so both share the os1 timestamp.
 
-LiDAR detections are the CODa 3D boxes used as oracle detections (positions
-at the box centre, shape as explicit corners). Camera detections are read
+LiDAR detections are either detector output (`--lidar-detections`, CODa-style
+JSON with scores, e.g. from detect_lidar_cpu.py) or, by default, the CODa 3D
+boxes used as oracle detections (positions at the box centre, shape as
+explicit corners). Camera detections are read
 from per-frame KITTI 2D detection files (`<frame:06d>.txt`, for example the
 output of scripts/runpod/detect_camera_yolo.py --image-dir). Ground truth is
 the same 3D boxes with their instance ids, mapped to the world frame.
@@ -120,6 +122,12 @@ def main() -> None:
     parser.add_argument("--first", type=int, required=True)
     parser.add_argument("--last", type=int, required=True)
     parser.add_argument("--camera-detections", type=Path, help="per-frame KITTI 2D detection files")
+    parser.add_argument(
+        "--lidar-detections",
+        type=Path,
+        help="per-frame CODa-style JSON detections with scores (e.g. detect_lidar_cpu.py); default: oracle boxes",
+    )
+    parser.add_argument("--lidar-score-threshold", type=float, default=0.4)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--default-covariance", type=float, default=0.04, help="LiDAR position variance (m^2)")
     parser.add_argument(
@@ -168,23 +176,34 @@ def main() -> None:
     for f in frames:
         t = timestamps[f]
         label_path = root / "3d_bbox" / "os1" / seq / f"3d_bbox_os1_{seq}_{f}.json"
-        boxes = json.loads(label_path.read_text())["3dbbox"] if label_path.exists() else []
-        boxes = [
-            b for b in boxes
+        labels = json.loads(label_path.read_text())["3dbbox"] if label_path.exists() else []
+        labels = [
+            b for b in labels
             if b["classId"] in CODA_CLASSES and math.hypot(b["cX"], b["cY"], b["cZ"]) <= args.max_range
         ]
-        detections, objects = [], []
+        if args.lidar_detections is None:
+            boxes = labels
+        else:
+            path = args.lidar_detections / f"3d_bbox_os1_{seq}_{f}.json"
+            boxes = json.loads(path.read_text())["3dbbox"] if path.exists() else []
+            boxes = [
+                b for b in boxes
+                if b["classId"] in CODA_CLASSES and b.get("score", 1.0) >= args.lidar_score_threshold
+                and math.hypot(b["cX"], b["cY"], b["cZ"]) <= args.max_range
+            ]
+        detections = []
         for b in boxes:
-            center = [b["cX"], b["cY"], b["cZ"]]
             detections.append({
-                "position": center,
+                "position": [b["cX"], b["cY"], b["cZ"]],
                 "covariance": (np.eye(3) * args.default_covariance).reshape(-1).tolist(),
                 "class": CODA_CLASSES[b["classId"]],
-                "score": 1.0,
+                "score": b.get("score", 1.0),
                 "shape": {"height": b["h"], "width": b["w"], "length": b["l"], "rotation_y": 0.0,
                           "corners": box_corners(b).reshape(-1).tolist()},
             })
-            world = poses[f] @ np.array(center + [1.0])
+        objects = []
+        for b in labels:
+            world = poses[f] @ np.array([b["cX"], b["cY"], b["cZ"], 1.0])
             objects.append({"truth_id": truth_id(b), "class": CODA_CLASSES[b["classId"]],
                             "position": world[:3].tolist()})
         inputs.append({"type": "lidar_batch", "schema_version": SCHEMA_VERSION, "sensor_id": LIDAR_SENSOR,
