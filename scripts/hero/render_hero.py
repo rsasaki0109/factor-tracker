@@ -5,20 +5,32 @@ and LiDAR scans.
 Inputs:
   <results>/<seq>/  files written by scripts/kitti/evaluate_sequences.sh
                     (setup.json, inputs.jsonl, camera_assisted.outputs.jsonl)
-  <kitti-root>      training/image_02/<seq>/*.png and training/velodyne/<seq>/*.bin
-                    for the rendered frames (scripts/kitti/fetch_frames.py)
+  --data-root       KITTI: training/image_02/<seq>/*.png, training/velodyne/<seq>/*.bin
+                    CODa:  2d_rect/cam0/<seq>/*.png, 3d_comp/os1/<seq>/*.bin
+                    for the rendered frames (scripts/kitti/fetch_frames.py,
+                    scripts/coda/fetch_coda.py)
 
-usage: render_hero.py <results/<seq>> <kitti-root> <out.gif> --start 160 --frames 100
+usage: render_hero.py <results/<seq>> <out.gif> --dataset kitti|coda --data-root <root> --start N --frames 100
 Requires NumPy, Pillow and ffmpeg.
 
-The README hero was produced with:
+The README hero (CODa, robot) was produced with:
+
+    python3 scripts/coda/fetch_coda.py --coda-root CODa --sequence 20 --first 8640 --last 8800
+    python3 scripts/runpod/detect_camera_yolo.py --image-dir CODa/2d_rect/cam0/20 --out-dir det/coda20
+    python3 scripts/coda/convert_coda.py --coda-root CODa --sequence 20 --first 8640 --last 8800 \
+        --camera-detections det/coda20 --out coda-seq/20
+    scripts/kitti/evaluate_sequences.sh coda-seq coda-res 20
+    python3 scripts/hero/render_hero.py coda-res/20 assets/hero.gif --dataset coda --data-root CODa \
+        --start 30 --frames 80 --width 840 --colors 128
+
+The earlier KITTI version:
 
     python3 scripts/kitti/fetch_frames.py --kitti-root kitti --sequence 0019 --first 150 --last 280
     python3 scripts/runpod/detect_camera_yolo.py --kitti-root kitti --out det --sequences 0019
     python3 scripts/kitti/convert_tracking.py --kitti-root kitti --out seq --sequences 0019 \
         --oracle --detections-root det          # LiDAR: labels, camera: YOLO11x
     scripts/kitti/evaluate_sequences.sh seq res 0019
-    python3 scripts/hero/render_hero.py res/0019 kitti assets/hero.gif --start 160 --frames 100
+    python3 scripts/hero/render_hero.py res/0019 kitti.gif --data-root kitti --start 160 --frames 100
 """
 
 from __future__ import annotations
@@ -35,7 +47,6 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-W = 1000
 MARGIN = 32
 SURFACE = (11, 18, 32)
 PANEL = (15, 23, 42)
@@ -46,6 +57,7 @@ TEXT_2 = (148, 163, 184)
 TEXT_3 = (100, 116, 139)
 # Validated categorical slots (dark): vehicle, pedestrian, cyclist.
 CLASS_COLOR = {"vehicle": (57, 135, 229), "pedestrian": (217, 89, 38), "cyclist": (25, 158, 112)}
+LEGEND_NAME = {"vehicle": "vehicle", "pedestrian": "pedestrian", "cyclist": "cyclist / scooter"}
 CLASS_GROUP = {1: "vehicle", 4: "vehicle", 5: "vehicle", 7: "vehicle", 8: "vehicle", 2: "pedestrian", 6: "pedestrian", 3: "cyclist"}
 # Box edges for corners ordered as Box3DShape: 0-3 bottom, 4-7 top.
 EDGES = [(0, 1), (1, 2), (2, 3), (3, 0), (4, 5), (5, 6), (6, 7), (7, 4), (0, 4), (1, 5), (2, 6), (3, 7)]
@@ -76,11 +88,12 @@ def tint(color, alpha, base=PANEL):
 def load(seq_dir: Path):
     setup = json.loads((seq_dir / "setup.json").read_text())
     poses = {p["timestamp_ns"]: mat4(p["transform"]) for p in setup["poses"]}
-    lidar_inputs, camera_inputs = {}, {}
+    lidar_inputs, camera_inputs, frame_numbers = {}, {}, {}
     for line in open(seq_dir / "inputs.jsonl"):
         record = json.loads(line)
         if record["type"] == "lidar_batch":
             lidar_inputs[record["event_time_ns"]] = record["detections"]
+            frame_numbers[record["event_time_ns"]] = record["sequence"]
         elif record["type"] == "camera_batch":
             camera_inputs[record["event_time_ns"]] = record["detections"]
     lidar_frames, camera_frames = {}, {}
@@ -90,16 +103,18 @@ def load(seq_dir: Path):
             lidar_frames[record["timestamp_ns"]] = record
         elif record["type"] == "camera_frame":
             camera_frames[record["timestamp_ns"]] = record
-    return setup, poses, lidar_inputs, camera_inputs, lidar_frames, camera_frames
+    return setup, poses, lidar_inputs, camera_inputs, lidar_frames, camera_frames, frame_numbers
 
 
 class Bev:
-    """Ego-centric bird's-eye view: velodyne x forward (right), y left (up)."""
+    """Ego-centric bird's-eye view: sensor x forward (right), y left (up)."""
 
-    def __init__(self, box, forward):
+    def __init__(self, box, forward, lateral=None):
         self.x0, self.y0, self.x1, self.y1 = box
         self.forward = forward
         self.scale = (self.x1 - self.x0) / (forward[1] - forward[0])
+        if lateral is not None:
+            self.scale = min(self.scale, (self.y1 - self.y0) / (2 * lateral))
         self.cy = (self.y0 + self.y1) / 2
 
     def px(self, x, y):
@@ -112,15 +127,26 @@ class Bev:
 
 class Renderer:
     def __init__(self, data, args):
-        self.setup, self.poses, self.lidar_inputs, self.camera_inputs, self.lidar_frames, self.camera_frames = data
+        (self.setup, self.poses, self.lidar_inputs, self.camera_inputs, self.lidar_frames, self.camera_frames,
+         self.frame_numbers) = data
         self.args = args
         intr = self.setup["intrinsics"]
         self.intr = intr
         self.ref_to_cam = np.linalg.inv(mat4(self.setup["camera_to_reference"]))
-        self.cam_w = W - 2 * MARGIN
-        self.sx = self.cam_w / intr["image_width"]
-        self.cam_box = (MARGIN, 84, MARGIN + self.cam_w, 84 + round(intr["image_height"] * self.sx))
-        self.bev_box = (MARGIN, self.cam_box[3] + 12, W - MARGIN, self.cam_box[3] + 12 + args.bev_height)
+        self.width = args.canvas_width
+        if intr["image_width"] / intr["image_height"] > 2:
+            # Wide images (KITTI): camera strip on top, bird's-eye view below.
+            self.cam_w = self.width - 2 * MARGIN
+            self.sx = self.cam_w / intr["image_width"]
+            self.cam_box = (MARGIN, 84, MARGIN + self.cam_w, 84 + round(intr["image_height"] * self.sx))
+            self.bev_box = (MARGIN, self.cam_box[3] + 12, self.width - MARGIN, self.cam_box[3] + 12 + args.bev_height)
+        else:
+            # Near-square images (CODa): camera left, bird's-eye view right.
+            cam_h = args.bev_height
+            self.sx = cam_h / intr["image_height"]
+            self.cam_w = round(intr["image_width"] * self.sx)
+            self.cam_box = (MARGIN, 84, MARGIN + self.cam_w, 84 + cam_h)
+            self.bev_box = (self.cam_box[2] + 12, 84, self.width - MARGIN, 84 + cam_h)
         self.height = self.bev_box[3] + 40
 
     def project(self, points_velo):
@@ -131,13 +157,15 @@ class Renderer:
         v = self.intr["fy"] * cam[:, 1] / cam[:, 2] + self.intr["cy"]
         return np.stack([self.cam_box[0] + u * self.sx, self.cam_box[1] + v * self.sx], axis=1)
 
-    def frame(self, t, frame_index, trails, camera_hits):
+    def frame(self, t, trails, camera_hits):
+        # The LiDAR batch sequence number is the dataset frame number.
+        frame_index = self.frame_numbers[t]
+        W = self.width
         img = Image.new("RGB", (W, self.height), SURFACE)
         d = ImageDraw.Draw(img)
         d.text((MARGIN, 18), "perception-engine", font=F_TITLE, fill=TEXT)
         d.text((MARGIN + 262, 30), "camera-assisted LiDAR tracking in Rust", font=F_SUB, fill=TEXT_2)
-        subtitle = "KITTI tracking 0019 · LiDAR: ground-truth boxes as oracle detections · camera: YOLO11x · tracks: perception-engine"
-        d.text((MARGIN, 56), subtitle, font=F_SMALL, fill=TEXT_3)
+        d.text((MARGIN, 56), self.args.subtitle, font=F_SMALL, fill=TEXT_3)
 
         lidar = self.lidar_frames[t]
         tracks = {tr["track_id"]: tr for tr in lidar["tracks"] if tr["lifecycle"] == "confirmed"}
@@ -156,7 +184,7 @@ class Renderer:
                     shapes[assoc["track_id"]] = np.array(det["shape"]["corners"]).reshape(8, 3)
 
         # ---- camera panel -------------------------------------------------
-        image = Image.open(self.args.kitti_root / "training" / "image_02" / self.args.sequence / f"{frame_index:06d}.png")
+        image = Image.open(self.args.image_pattern.format(frame=frame_index))
         image = image.convert("RGB").resize((self.cam_box[2] - self.cam_box[0], self.cam_box[3] - self.cam_box[1]), Image.LANCZOS)
         image = Image.blend(image, Image.new("RGB", image.size, SURFACE), 0.18)
         img.paste(image, self.cam_box[:2])
@@ -172,12 +200,16 @@ class Renderer:
                 continue
             center = to_velo(track["position"])
             pts = self.project(shapes[tid] + center)
-            if pts is None:
+            mid = self.project(center[None, :])
+            if pts is None or mid is None or not (
+                self.cam_box[0] <= mid[0, 0] <= self.cam_box[2] and self.cam_box[1] <= mid[0, 1] <= self.cam_box[3]
+            ):
                 continue
             color = CLASS_COLOR[group_of(track["class_label"])]
             for a, b in EDGES:
                 o.line((*pts[a], *pts[b]), fill=color + (255,), width=2)
-            tags.append((pts[:, 0].min(), pts[:, 1].min(), tid, color, camera_hits.get(tid) == t))
+            if pts[:, 1].max() - pts[:, 1].min() >= self.args.min_tag_height:
+                tags.append((pts[:, 0].min(), pts[:, 1].min(), tid, color, camera_hits.get(tid) == t))
         region = overlay.crop(self.cam_box)
         img.paste(region, self.cam_box[:2], region)
         d = ImageDraw.Draw(img)
@@ -191,30 +223,32 @@ class Renderer:
         d.rectangle(self.cam_box, outline=BORDER)
 
         # ---- bird's-eye panel ---------------------------------------------
+        outside = img.copy()
         d.rounded_rectangle(self.bev_box, 10, fill=PANEL, outline=BORDER)
-        bev = Bev((self.bev_box[0] + 1, self.bev_box[1] + 1, self.bev_box[2] - 1, self.bev_box[3] - 1), self.args.forward)
-        for r in range(10, int(self.args.forward[1]), 10):
+        bev = Bev((self.bev_box[0] + 1, self.bev_box[1] + 1, self.bev_box[2] - 1, self.bev_box[3] - 1), self.args.forward,
+                  self.args.lateral)
+        step = self.args.ruler_step
+        for r in range(step, int(self.args.forward[1]), step):
             u, _ = bev.px(r, 0)
             d.line((u, self.bev_box[1] + 24, u, self.bev_box[3] - 28), fill=GRID)
             d.text((u + 4, self.bev_box[3] - 44), f"{r} m", font=F_SMALL, fill=TEXT_3)
-        ruler = [(bev.px(r, 0)[0] + 4, self.bev_box[3] - 44, f"{r} m") for r in range(10, int(self.args.forward[1]), 10)]
-        scan = np.fromfile(self.args.kitti_root / "training" / "velodyne" / self.args.sequence / f"{frame_index:06d}.bin",
-                           dtype=np.float32).reshape(-1, 4)
-        keep = (scan[:, 0] > self.args.forward[0]) & (scan[:, 0] < self.args.forward[1]) & (np.abs(scan[:, 1]) < 30)
+        ruler = [(bev.px(r, 0)[0] + 4, self.bev_box[3] - 44, f"{r} m") for r in range(step, int(self.args.forward[1]), step)]
+        scan = np.fromfile(self.args.scan_pattern.format(frame=frame_index), dtype=np.float32).reshape(-1, 4)
+        scan = scan[np.isfinite(scan).all(axis=1) & (np.abs(scan[:, :3]).sum(axis=1) > 0.1)]
+        near = np.hypot(scan[:, 0], scan[:, 1]) < 10
+        ground = np.percentile(scan[near, 2], 5) if near.any() else -1.7
+        keep = (scan[:, 0] > self.args.forward[0]) & (scan[:, 0] < self.args.forward[1]) & (np.abs(scan[:, 1]) < 40)
         scan = scan[keep]
         u = (self.bev_box[0] + 1 + (scan[:, 0] - self.args.forward[0]) * bev.scale).astype(int)
         v = (bev.cy - scan[:, 1] * bev.scale).astype(int)
         inside = (u > self.bev_box[0] + 2) & (u < self.bev_box[2] - 2) & (v > self.bev_box[1] + 2) & (v < self.bev_box[3] - 2)
-        # Height above the road (sensor at ~1.73 m): ground dark, obstacles light.
-        height = np.clip((scan[:, 2] + 1.73) / 2.5, 0.0, 1.0)
+        # Height above the ground: ground dark, obstacles light.
+        height = np.clip((scan[:, 2] - ground) / 2.2, 0.0, 1.0)
         pixels = np.asarray(img).copy()
         shade = (np.array(PANEL) + (np.array([203, 213, 225]) - np.array(PANEL)) * (0.18 + 0.6 * height[:, None])).astype(np.uint8)
         pixels[v[inside], u[inside]] = shade[inside]
         img = Image.fromarray(pixels)
         d = ImageDraw.Draw(img)
-        d.rectangle((self.bev_box[0] + 6, self.bev_box[1] + 5, self.bev_box[0] + 590, self.bev_box[1] + 22), fill=PANEL)
-        d.text((self.bev_box[0] + 12, self.bev_box[1] + 8), "BIRD'S-EYE VIEW · Velodyne scan, LiDAR tracks in the world frame drawn around the ego vehicle",
-               font=F_TAG, fill=TEXT_3)
 
         for u_text, v_text, text in ruler:
             tw = d.textlength(text, font=F_SMALL)
@@ -245,7 +279,8 @@ class Renderer:
             radius = 2 * math.sqrt(max(np.linalg.eigvalsh(cov).max(), 0.0)) * bev.scale
             cu, cv = bev.px(*center[:2])
             d.ellipse((cu - radius, cv - radius, cu + radius, cv + radius), outline=tint(color, 0.8))
-            labels.append((cu, top - 15, f"#{tid}"))
+            if math.hypot(*center[:2]) <= self.args.label_range:
+                labels.append((cu, top - 15, f"#{tid}"))
         placed = []
         for u, v, text in sorted(labels, key=lambda item: item[1]):
             tw = d.textlength(text, font=F_LABEL)
@@ -254,26 +289,75 @@ class Renderer:
                 v -= 13
             placed.append((u, v, tw))
             d.text((u, v), text, font=F_LABEL, fill=TEXT)
-        ego = [bev.px(1.6, 0.85), bev.px(1.6, -0.85), bev.px(-2.6, -0.85), bev.px(-2.6, 0.85)]
+        front, back, half = self.args.ego_size
+        nose = front + max(0.25 * (front - back), 0.3)
+        ego = [bev.px(front, half), bev.px(front, -half), bev.px(back, -half), bev.px(back, half)]
         d.polygon(ego, fill=TEXT)
-        d.polygon([bev.px(1.6, 0.85), bev.px(1.6, -0.85), bev.px(2.6, 0)], fill=TEXT)
+        d.polygon([bev.px(front, half), bev.px(front, -half), bev.px(nose, 0)], fill=TEXT)
 
+        # Clip everything drawn for the bird's-eye view to its panel.
+        mask = Image.new("L", img.size, 0)
+        ImageDraw.Draw(mask).rounded_rectangle(self.bev_box, 10, fill=255)
+        img = Image.composite(img, outside, mask)
+        d = ImageDraw.Draw(img)
+        d.rounded_rectangle(self.bev_box, 10, outline=BORDER)
+        tag = f"BIRD'S-EYE VIEW · {self.args.lidar_name} scan, tracks kept in the world frame, drawn around the {self.args.ego_name}"
+        d.rectangle((self.bev_box[0] + 6, self.bev_box[1] + 5, self.bev_box[0] + 18 + d.textlength(tag, font=F_TAG), self.bev_box[1] + 22),
+                    fill=PANEL)
+        d.text((self.bev_box[0] + 12, self.bev_box[1] + 8), tag, font=F_TAG, fill=TEXT_3)
         lx, ly = self.bev_box[0] + 12, self.bev_box[3] - 22
         d.rectangle((self.bev_box[0] + 6, ly - 3, self.bev_box[2] - 6, ly + 16), fill=PANEL)
-        for name in ("vehicle", "pedestrian", "cyclist"):
+        for name in self.args.legend:
             d.rectangle((lx, ly + 3, lx + 10, ly + 13), fill=CLASS_COLOR[name])
-            d.text((lx + 15, ly), name, font=F_SMALL, fill=TEXT_2)
-            lx += d.textlength(name, font=F_SMALL) + 32
-        d.text((lx + 4, ly), "filled = associated with a camera detection this frame · ring = 2σ position uncertainty",
-               font=F_SMALL, fill=TEXT_3)
+            d.text((lx + 15, ly), LEGEND_NAME[name], font=F_SMALL, fill=TEXT_2)
+            lx += d.textlength(LEGEND_NAME[name], font=F_SMALL) + 32
+        d.text((lx + 4, ly), "filled = camera-associated · ring = 2σ", font=F_SMALL, fill=TEXT_3)
 
         camera = self.camera_frames.get(t, {})
         matched = sum(1 for m in camera.get("matches", []) if m["accepted"])
         status = f"frame {frame_index:04d} · {len(tracks)} confirmed tracks · {matched} camera associations"
         d.text((MARGIN, self.height - 28), status, font=F_SMALL, fill=TEXT_2)
-        attribution = "KITTI images, scans and labels: Geiger et al., CC BY-NC-SA 3.0"
+        attribution = self.args.attribution
         d.text((W - MARGIN - d.textlength(attribution, font=F_SMALL), self.height - 28), attribution, font=F_SMALL, fill=TEXT_3)
         return img
+
+
+PRESETS = {
+    "kitti": {
+        "image_pattern": "{root}/training/image_02/{seq}/{{frame:06d}}.png",
+        "scan_pattern": "{root}/training/velodyne/{seq}/{{frame:06d}}.bin",
+        "subtitle": "KITTI tracking {seq} · LiDAR: ground-truth boxes as oracle detections · camera: YOLO11x · tracks: perception-engine",
+        "attribution": "KITTI images, scans and labels: Geiger et al., CC BY-NC-SA 3.0",
+        "lidar_name": "Velodyne",
+        "ego_name": "ego vehicle",
+        "ego_size": (1.6, -2.6, 0.85),
+        "legend": ("vehicle", "pedestrian", "cyclist"),
+        "forward": (-5.0, 60.0),
+        "lateral": None,
+        "ruler_step": 10,
+        "bev_height": 250,
+        "canvas_width": 1000,
+        "label_range": 1000.0,
+        "min_tag_height": 0.0,
+    },
+    "coda": {
+        "image_pattern": "{root}/2d_rect/cam0/{seq}/2d_rect_cam0_{seq}_{{frame}}.png",
+        "scan_pattern": "{root}/3d_comp/os1/{seq}/3d_comp_os1_{seq}_{{frame}}.bin",
+        "subtitle": "CODa sequence {seq} · Clearpath Husky robot on a university campus · LiDAR: ground-truth boxes as oracle detections · camera: YOLO11x",
+        "attribution": "CODa (UT Campus Object Dataset): Zhang et al., CC BY-NC-SA 4.0",
+        "lidar_name": "Ouster OS1-128",
+        "ego_name": "robot",
+        "ego_size": (0.5, -0.5, 0.34),
+        "legend": ("pedestrian", "cyclist", "vehicle"),
+        "forward": (-4.0, 26.0),
+        "lateral": 11.0,
+        "ruler_step": 5,
+        "bev_height": 470,
+        "canvas_width": 1200,
+        "label_range": 8.0,
+        "min_tag_height": 90.0,
+    },
+}
 
 
 def encode_gif(frames_dir: Path, out: Path, fps: int, width: int | None, colors: int, dither: str) -> None:
@@ -282,7 +366,7 @@ def encode_gif(frames_dir: Path, out: Path, fps: int, width: int | None, colors:
     palette = frames_dir / "palette.png"
     pattern = str(frames_dir / "%04d.png")
     subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-framerate", str(fps), "-i", pattern,
-                    "-vf", f"{scale},palettegen=max_colors={colors}:stats_mode=diff", str(palette)], check=True)
+                    "-vf", f"{scale},palettegen=max_colors={colors}:stats_mode=full", str(palette)], check=True)
     subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-framerate", str(fps), "-i", pattern, "-i", str(palette),
                     "-lavfi", f"[0:v]{scale}[x];[x][1:v]paletteuse=dither={dither}:diff_mode=rectangle",
                     "-loop", "0", str(out)], check=True)
@@ -292,22 +376,31 @@ def encode_gif(frames_dir: Path, out: Path, fps: int, width: int | None, colors:
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("seq_dir", type=Path)
-    parser.add_argument("kitti_root", type=Path)
     parser.add_argument("out", type=Path)
+    parser.add_argument("--dataset", choices=sorted(PRESETS), default="kitti")
+    parser.add_argument("--data-root", type=Path, required=True, help="KITTI root or CODa root")
+    parser.add_argument("--sequence", help="sequence name (default: the name of seq_dir)")
     parser.add_argument("--start", type=int, default=0, help="first rendered frame index")
     parser.add_argument("--frames", type=int, default=100)
     parser.add_argument("--trail", type=int, default=20)
     parser.add_argument("--fps", type=int, default=10)
-    parser.add_argument("--forward", type=float, nargs=2, default=(-5.0, 60.0))
-    parser.add_argument("--bev-height", type=int, default=250)
+    parser.add_argument("--forward", type=float, nargs=2)
+    parser.add_argument("--lateral", type=float)
+    parser.add_argument("--bev-height", type=int)
     parser.add_argument("--width", type=int, default=760, help="scale the GIF to this width (0 = no scaling)")
+    parser.add_argument("--canvas-width", type=int)
+    parser.add_argument("--label-range", type=float, help="label bird's-eye tracks within this range (m)")
+    parser.add_argument("--min-tag-height", type=float, help="tag camera boxes at least this tall (px)")
     parser.add_argument("--colors", type=int, default=80)
     parser.add_argument("--dither", default="none", help="ffmpeg paletteuse dither (none, bayer, sierra2_4a, ...)")
     parser.add_argument("--keep-frames", type=Path, help="also copy the rendered PNG frames here")
     parser.add_argument("--still", type=Path, help="also write one frame as PNG")
     parser.add_argument("--still-index", type=int, default=50)
     args = parser.parse_args()
-    args.sequence = args.seq_dir.name
+    args.sequence = args.sequence or args.seq_dir.name
+    for key, value in PRESETS[args.dataset].items():
+        if getattr(args, key, None) is None:
+            setattr(args, key, value.format(root=args.data_root, seq=args.sequence) if isinstance(value, str) else value)
 
     data = load(args.seq_dir)
     renderer = Renderer(data, args)
@@ -327,7 +420,7 @@ def main():
             continue
         if rendered >= args.frames:
             break
-        frame = renderer.frame(t, index, trails, camera_hits)
+        frame = renderer.frame(t, trails, camera_hits)
         frame.save(work / f"{rendered:04d}.png")
         if args.still and rendered == args.still_index:
             frame.save(args.still)

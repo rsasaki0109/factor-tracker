@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Runs prepare -> replay (three modes) -> evaluate -> report for every sequence
-# directory written by convert_tracking.py, then aggregates the metrics.
+# directory written by convert_tracking.py (or already holding setup.json,
+# inputs.jsonl and truth.jsonl), then aggregates the metrics.
 #
 # usage: scripts/kitti/evaluate_sequences.sh <converted-root> <results-dir> [sequence ...]
 #
@@ -35,14 +36,19 @@ for seq in "${sequences[@]}"; do
   in="$converted/$seq"
   out="$results/$seq"
   mkdir -p "$out"
-  read -r width height < "$in/image_size.txt"
-  labels=()
-  [[ -d "$in/labels_lidar" ]] && labels=(--lidar-labels "$in/labels_lidar")
-  "$cli" prepare --calib "$in/calib.txt" --times "$in/times.txt" --poses "$in/poses.txt" \
-    --lidar-detections "$in/detections_lidar" --camera-detections "$in/detections_camera" \
-    "${labels[@]}" --image-width "$width" --image-height "$height" \
-    --out-setup "$out/setup.json" --out-inputs "$out/inputs.jsonl" --out-truth "$out/truth.jsonl" \
-    > "$out/prepare.log"
+  if [[ -f "$in/setup.json" ]]; then
+    # Already in engine JSONL (e.g. scripts/coda/convert_coda.py).
+    [[ "$in" -ef "$out" ]] || cp "$in/setup.json" "$in/inputs.jsonl" "$in/truth.jsonl" "$out/"
+  else
+    read -r width height < "$in/image_size.txt"
+    labels=()
+    [[ -d "$in/labels_lidar" ]] && labels=(--lidar-labels "$in/labels_lidar")
+    "$cli" prepare --calib "$in/calib.txt" --times "$in/times.txt" --poses "$in/poses.txt" \
+      --lidar-detections "$in/detections_lidar" --camera-detections "$in/detections_camera" \
+      "${labels[@]}" --image-width "$width" --image-height "$height" \
+      --out-setup "$out/setup.json" --out-inputs "$out/inputs.jsonl" --out-truth "$out/truth.jsonl" \
+      > "$out/prepare.log"
+  fi
   for mode in "${modes[@]}"; do
     "$cli" replay --setup "$out/setup.json" --inputs "$out/inputs.jsonl" --mode "$mode" \
       --output "$out/$mode.outputs.jsonl" --diagnostics "$out/$mode.diagnostics.json" \

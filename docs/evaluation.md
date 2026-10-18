@@ -82,24 +82,25 @@ calibration/projection and pose handling, and the tracker on real geometry and
 timing. It is **not** a detection or tracking benchmark result.
 
 `evaluate_sequences.sh` replays with `--initial-velocity-variance 100`
-(an initial velocity standard deviation of 10 m/s); see "Initial velocity
-variance" below.
+(an initial velocity standard deviation of 10 m/s; see "Initial velocity
+variance" below) and the engine's default matching cascade (see "Matching
+cascade").
 
 | mode | coverage | position RMSE (m) | id switches | class accuracy | camera match rate |
 | --- | --- | --- | --- | --- | --- |
-| lidar_only | 1.000 | 0.107 | 18 | 1.000 | n/a |
-| camera_associated | 1.000 | 0.107 | 18 | 1.000 | 0.993 |
-| camera_assisted | 1.000 | 0.107 | 18 | 1.000 | 0.993 |
+| lidar_only | 1.000 | 0.106 | 15 | 1.000 | n/a |
+| camera_associated | 1.000 | 0.106 | 15 | 1.000 | 0.993 |
+| camera_assisted | 1.000 | 0.106 | 15 | 1.000 | 0.993 |
 
 - Camera match rate: accepted camera associations over camera detections.
   Projected label boxes and labelled image boxes agree, which checks `P2`, the
   rectification and the velodyne/camera transforms.
 - The non-zero position RMSE is filter lag (constant-velocity Kalman filter),
   since the inputs are exact.
-- The remaining ID switches (0013: 8, 0019: 3, 0004: 2, 0020: 2, 0005, 0009,
-  0018: 1 each) were inspected one by one:
-  - pedestrians walking less than 1 m apart swap identities (0013, 0019):
-    real association ambiguity for a position-only tracker;
+- The remaining ID switches (0013: 8, 0004: 2, 0020: 2, 0005, 0009, 0018: 1
+  each) were inspected one by one:
+  - pedestrians walking less than 1 m apart swap identities (0013): real
+    association ambiguity for a position-only tracker;
   - objects reappearing after more than 2 s of occlusion get a new track
     (0004, 0009), because the lost track has already been deleted;
   - label artifacts: in 0018 an oncoming car at 16 m/s stops within one frame
@@ -121,9 +122,49 @@ Sweep over all 21 sequences (oracle detections, `lidar_only`):
 | id switches | 98 | 31 | 18 | 17 | 20 |
 | position RMSE (m) | 0.176 | 0.116 | 0.107 | 0.106 | 0.106 |
 
-`replay` exposes `--initial-velocity-variance`, `--accel-spectral-density` and
-`--gate-squared-mahalanobis`. The library default is unchanged; it suits the
-synthetic scenarios and slow objects.
+`replay` exposes `--initial-velocity-variance`, `--accel-spectral-density`,
+`--gate-squared-mahalanobis` and `--recent-track-window-ns`. The library
+default is unchanged; it suits the synthetic scenarios and slow objects. (The
+sweep above predates the matching cascade.)
+
+#### Matching cascade
+
+Association cost is the squared Mahalanobis distance. A track that coasts
+without observations grows its covariance, so its distance to an observation
+shrinks: when two tracks sit on one object, the coasting one takes the
+observation back, the other starts coasting, and the two alternate. The
+engine therefore associates in two stages (the "matching cascade" of
+DeepSORT): tracks observed within `recent_track_window_ns` (engine default
+150 ms, i.e. the previous LiDAR scan at 10 Hz) first, the remaining tracks
+against the leftover observations. In `perception-core` the option defaults to
+off.
+
+| oracle detections | without cascade | with cascade |
+| --- | --- | --- |
+| KITTI tracking, 21 sequences (`lidar_only` id switches) | 18 | 15 |
+| CODa sequence 20, frames 8640-8800 (`lidar_only` id switches) | 158 | 58 |
+
+### CODa (robot), oracle LiDAR detections, YOLO11x camera detections
+
+CODa sequence 20, frames 8640-8800 (16 s): a Clearpath Husky robot driving
+through a crowd on the UT Austin campus, 91 labelled dynamic objects per frame
+on average (203 identities, mostly pedestrians). LiDAR detections are the
+CODa 3D boxes (oracle); camera detections are YOLO11x (COCO) on the rectified
+left camera. Converted with `scripts/coda/convert_coda.py` (boxes beyond 80 m
+dropped: one pedestrian label in this window drifts kilometres away).
+
+| mode | coverage | position RMSE (m) | id switches | class accuracy | camera match rate |
+| --- | --- | --- | --- | --- | --- |
+| lidar_only | 1.000 | 0.089 | 58 | 1.000 | n/a |
+| camera_associated | 1.000 | 0.089 | 58 | 1.000 | 0.980 |
+| camera_assisted | 1.000 | 0.089 | 58 | 1.000 | 0.980 |
+
+- Camera match rate: accepted associations over YOLO detections in view of a
+  projected track (1,938 of 1,977); this checks the CODa LiDAR-camera
+  calibration path (`R_rect * T_os1_cam0`, rectified projection).
+- About half of the 58 switches are two pedestrians closer than ~0.6 m
+  exchanging tracks in the same frame, i.e. the ambiguity appearance (ReID)
+  would address; the rest are tracks re-spawned after an abrupt label jump.
 
 Detector-based results will be added once `scripts/runpod/` has been run.
 

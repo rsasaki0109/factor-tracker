@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/hero.gif" alt="perception-engine on KITTI tracking sequence 0019: camera frames with YOLO detections and projected 3D track boxes (top), Velodyne scan with LiDAR tracks, trails and uncertainty rings in a bird's-eye view (bottom)" width="100%">
+  <img src="assets/hero.gif" alt="perception-engine on a Clearpath Husky robot driving through a campus crowd (CODa sequence 20): camera frames with YOLO detections and projected 3D track boxes (left), Ouster OS1-128 scan with pedestrian tracks, trails and uncertainty rings in a bird's-eye view around the robot (right)" width="100%">
 </p>
 
 <h1 align="center">perception-engine</h1>
@@ -11,7 +11,7 @@
   <img src="https://img.shields.io/badge/dependencies-nalgebra%20%7C%20thiserror-informational.svg" alt="Dependencies: nalgebra, thiserror">
 </p>
 
-<p align="center"><em>KITTI tracking sequence 0019: real camera frames and Velodyne scans. Camera detections are YOLO11x (COCO) output; LiDAR detections are the ground-truth 3D boxes used as oracle detections until a LiDAR detector is run (<code>scripts/runpod/</code>); boxes, IDs, trails and uncertainty rings are the engine's <code>camera_assisted</code> tracks. Ego poses come from OXTS. The animation contains KITTI data and is licensed under <a href="https://creativecommons.org/licenses/by-nc-sa/3.0/">CC BY-NC-SA 3.0</a> (Geiger et al.), unlike the code. Rendered with <code>scripts/hero/render_hero.py</code>; the synthetic-demo image is <a href="assets/hero.svg"><code>assets/hero.svg</code></a>.</em></p>
+<p align="center"><em>A Clearpath Husky robot driving through a crowd on the UT Austin campus (<a href="https://github.com/ut-amrl/coda-devkit">CODa</a> sequence 20): real camera frames and Ouster OS1-128 scans. Camera detections are YOLO11x (COCO) output; LiDAR detections are the CODa ground-truth 3D boxes used as oracle detections until a LiDAR detector is run (<code>scripts/runpod/</code>); boxes, IDs, trails and uncertainty rings are the engine's <code>camera_assisted</code> tracks in the world frame (CODa SLAM poses). The animation contains CODa data and is licensed under <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/">CC BY-NC-SA 4.0</a> (Zhang et al.), unlike the code. Rendered with <code>scripts/hero/render_hero.py</code>; the synthetic-demo image is <a href="assets/hero.svg"><code>assets/hero.svg</code></a>.</em></p>
 
 ---
 
@@ -68,6 +68,7 @@ dependency. Numeric work uses `f64`.
 | 3D constant-velocity Kalman tracker (`[x, y, z]` + velocities) | implemented |
 | Linear Kalman filter with Cholesky solves and Joseph-form updates | implemented |
 | Hungarian (Kuhn–Munkres) assignment with explicit unmatched costs | implemented |
+| Matching cascade for 3D association (recently observed tracks first; on in the engine) | implemented |
 | IoU gating (2D) and squared-Mahalanobis gating (3D) | implemented |
 | Class-aware gating (`None` class is compatible with everything) | implemented |
 | Track lifecycle: Tentative → Confirmed → Lost → Deleted, with recovery | implemented |
@@ -90,6 +91,7 @@ perception-engine/
   crates/perception-engine/  camera-assisted LiDAR SDK (calibration, projection, async, eval, KITTI)
   crates/perception-cli/     CLI, JSONL schemas, scenarios, reports
   scripts/kitti/             KITTI tracking conversion and multi-sequence evaluation (Python + NumPy)
+  scripts/coda/              CODa (robot dataset) frame fetch and conversion to engine JSONL
   scripts/runpod/            GPU detector runs (OpenPCDet, Ultralytics) on a RunPod pod
   docs/                      architecture, data format, algorithms, camera-lidar, datasets, evaluation
   assets/                    demo assets (hero image)
@@ -137,7 +139,8 @@ expected to improve.
 Real KITTI data uses the same `replay`/`evaluate`/`report` path after
 `prepare`; see [`docs/datasets.md`](docs/datasets.md) and
 [`docs/camera-lidar.md`](docs/camera-lidar.md). `scripts/kitti/` converts the
-KITTI tracking benchmark and evaluates every sequence; `scripts/runpod/` runs
+KITTI tracking benchmark and evaluates every sequence; `scripts/coda/` does
+the same for the CODa robot dataset (Clearpath Husky, Ouster OS1-128); `scripts/runpod/` runs
 GPU detectors (OpenPCDet, Ultralytics) on a RunPod pod to produce the
 detections. The only real-data numbers so far use oracle detections
 ([`docs/evaluation.md`](docs/evaluation.md)); the demo numbers come from the

@@ -145,3 +145,40 @@ Truth records are only read by `evaluate` and the report. They are never passed
 to `EngineBatch` inputs and never enter the tracker. The synthetic 3D ground
 truth and the camera detection-to-truth mapping are written to a separate
 `truth.jsonl`.
+
+## CODa (robot)
+
+[CODa](https://github.com/ut-amrl/coda-devkit) (UT Campus Object Dataset) is
+recorded from a Clearpath Husky robot driving at walking speed through the UT
+Austin campus: an Ouster OS1-128 LiDAR hardware-triggering two global-shutter
+cameras at 10 Hz, 3D boxes with instance ids for 50+ classes (mostly
+pedestrians in busy sequences) and globally consistent SLAM poses. It is
+licensed CC BY-NC-SA 4.0 with additional dataset terms (see the devkit's
+`docs/DATA_REPORT.md`); nothing from it is redistributed here except the
+README animation, which carries that licence.
+
+The per-sequence ZIPs on the TACC server are 40-110 GB, so
+`scripts/coda/fetch_coda.py` extracts a frame range with parallel HTTP range
+requests (rectified cam0 images, ego-compensated scans, 3D boxes, calibration,
+timestamps, `dense_global` poses). `scripts/coda/convert_coda.py` writes engine
+JSONL directly:
+
+- reference frame `os1`; tracking frame `world` from `poses/dense_global`
+  (one pose per LiDAR frame);
+- camera: stereo-rectified cam0, intrinsics from the rectified projection
+  matrix, `camera_to_reference = inverse(R_rect * T_os1_cam0)`; LiDAR and
+  camera share the LiDAR timestamp (hardware trigger);
+- LiDAR detections: the CODa 3D boxes of dynamic classes (pedestrian,
+  vehicles, scooter/segway/skateboard) as oracle detections, position at the
+  box centre, shape as explicit corners; static classes are dropped;
+- camera detections: per-frame KITTI 2D files, e.g. from
+  `scripts/runpod/detect_camera_yolo.py --image-dir ... --out-dir ...`;
+- ground truth: the same boxes, instance ids made unique across classes.
+
+```sh
+python3 scripts/coda/fetch_coda.py --coda-root CODa --sequence 20 --first 8640 --last 8800
+python3 scripts/runpod/detect_camera_yolo.py --image-dir CODa/2d_rect/cam0/20 --out-dir det/coda20
+python3 scripts/coda/convert_coda.py --coda-root CODa --sequence 20 --first 8640 --last 8800 \
+    --camera-detections det/coda20 --out coda-seq/20
+scripts/kitti/evaluate_sequences.sh coda-seq coda-results 20
+```
