@@ -189,6 +189,15 @@ enum Command {
         /// Pause end event time (ns).
         #[arg(long, default_value_t = 0)]
         pause_end_ns: i64,
+        /// Override the tracker's initial velocity variance (m^2/s^2).
+        #[arg(long)]
+        initial_velocity_variance: Option<f64>,
+        /// Override the tracker's acceleration spectral density (m^2/s^3).
+        #[arg(long)]
+        accel_spectral_density: Option<f64>,
+        /// Override the tracker's squared-Mahalanobis gate.
+        #[arg(long)]
+        gate_squared_mahalanobis: Option<f64>,
     },
     /// Evaluate replay outputs against ground truth.
     Evaluate {
@@ -411,6 +420,9 @@ fn run(cli: Cli) -> CliResult<()> {
             pause_sensor,
             pause_start_ns,
             pause_end_ns,
+            initial_velocity_variance,
+            accel_spectral_density,
+            gate_squared_mahalanobis,
         } => {
             let injection = cam::injection_from_flags(
                 lidar_delay_ns,
@@ -421,7 +433,20 @@ fn run(cli: Cli) -> CliResult<()> {
                 pause_start_ns,
                 pause_end_ns,
             )?;
-            cam::run_replay(&setup, &inputs, &mode, &output, &diagnostics, injection)
+            let tracker = cam::TrackerOverrides {
+                initial_velocity_variance,
+                accel_spectral_density,
+                gate_squared_mahalanobis,
+            };
+            cam::run_replay(
+                &setup,
+                &inputs,
+                &mode,
+                &output,
+                &diagnostics,
+                injection,
+                tracker,
+            )
         }
         Command::Evaluate {
             output,

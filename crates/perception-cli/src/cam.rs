@@ -24,6 +24,8 @@ pub struct ReplayOptions {
     pub mode: TrackingMode,
     /// Injection configuration.
     pub injection: InjectionConfig,
+    /// Optional overrides of the 3D tracker defaults.
+    pub tracker: TrackerOverrides,
 }
 
 impl Default for ReplayOptions {
@@ -31,8 +33,20 @@ impl Default for ReplayOptions {
         ReplayOptions {
             mode: TrackingMode::CameraAssociated,
             injection: InjectionConfig::default(),
+            tracker: TrackerOverrides::default(),
         }
     }
+}
+
+/// Optional overrides of [`perception_core::Cartesian3DTrackerConfig`] fields.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct TrackerOverrides {
+    /// Initial velocity variance (m^2/s^2).
+    pub initial_velocity_variance: Option<f64>,
+    /// Acceleration spectral density (m^2/s^3).
+    pub accel_spectral_density: Option<f64>,
+    /// Squared-Mahalanobis association gate.
+    pub gate_squared_mahalanobis: Option<f64>,
 }
 
 /// Parses a mode string.
@@ -153,6 +167,16 @@ pub fn replay_setup(
         ..EngineConfig::default()
     };
     config.tracker.frame_id = calibration.tracking_frame.clone();
+    let overrides = options.tracker;
+    if let Some(value) = overrides.initial_velocity_variance {
+        config.tracker.initial_velocity_variance = value;
+    }
+    if let Some(value) = overrides.accel_spectral_density {
+        config.tracker.accel_spectral_density = value;
+    }
+    if let Some(value) = overrides.gate_squared_mahalanobis {
+        config.tracker.gate_squared_mahalanobis = value;
+    }
     let engine = replay::run(calibration, poses, config, &injected)?;
     Ok(ReplayResult {
         lidar_frames: engine.lidar_frames().to_vec(),
@@ -170,10 +194,12 @@ pub fn run_replay(
     output: &Path,
     diagnostics: &Path,
     injection: InjectionConfig,
+    tracker: TrackerOverrides,
 ) -> CliResult<()> {
     let options = ReplayOptions {
         mode: parse_mode(mode)?,
         injection,
+        tracker,
     };
     let result = replay_setup(setup, inputs, &options)?;
     write_outputs(output, &result.lidar_frames, &result.camera_frames)?;

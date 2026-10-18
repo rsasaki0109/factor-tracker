@@ -3,7 +3,13 @@
 # directory written by convert_tracking.py, then aggregates the metrics.
 #
 # usage: scripts/kitti/evaluate_sequences.sh <converted-root> <results-dir> [sequence ...]
+#
+# REPLAY_ARGS is passed to every `replay` call. It defaults to an initial
+# velocity standard deviation of 10 m/s, because KITTI tracks live in the world
+# frame where vehicles move at 10-30 m/s (see docs/evaluation.md). Set
+# REPLAY_ARGS="" for the library defaults.
 set -euo pipefail
+REPLAY_ARGS=${REPLAY_ARGS---initial-velocity-variance 100}
 
 if [[ $# -lt 2 ]]; then
   echo "usage: $0 <converted-root> <results-dir> [sequence ...]" >&2
@@ -40,7 +46,7 @@ for seq in "${sequences[@]}"; do
   for mode in "${modes[@]}"; do
     "$cli" replay --setup "$out/setup.json" --inputs "$out/inputs.jsonl" --mode "$mode" \
       --output "$out/$mode.outputs.jsonl" --diagnostics "$out/$mode.diagnostics.json" \
-      > "$out/$mode.replay.log"
+      $REPLAY_ARGS > "$out/$mode.replay.log"
     "$cli" evaluate --output "$out/$mode.outputs.jsonl" --truth "$out/truth.jsonl" \
       --metrics "$out/$mode.metrics.json" > /dev/null
   done

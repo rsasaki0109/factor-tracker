@@ -81,20 +81,49 @@ ground-truth labels themselves, so this is a check of the adapter, the
 calibration/projection and pose handling, and the tracker on real geometry and
 timing. It is **not** a detection or tracking benchmark result.
 
+`evaluate_sequences.sh` replays with `--initial-velocity-variance 100`
+(an initial velocity standard deviation of 10 m/s); see "Initial velocity
+variance" below.
+
 | mode | coverage | position RMSE (m) | id switches | class accuracy | camera match rate |
 | --- | --- | --- | --- | --- | --- |
-| lidar_only | 1.000 | 0.176 | 98 | 1.000 | n/a |
-| camera_associated | 1.000 | 0.176 | 98 | 1.000 | 0.994 |
-| camera_assisted | 1.000 | 0.176 | 98 | 1.000 | 0.994 |
+| lidar_only | 1.000 | 0.107 | 18 | 1.000 | n/a |
+| camera_associated | 1.000 | 0.107 | 18 | 1.000 | 0.993 |
+| camera_assisted | 1.000 | 0.107 | 18 | 1.000 | 0.993 |
 
-- Camera match rate: accepted camera associations over camera detections
-  (46,958 / 47,262). Projected label boxes and labelled image boxes agree, which
-  checks `P2`, the rectification and the velodyne/camera transforms.
+- Camera match rate: accepted camera associations over camera detections.
+  Projected label boxes and labelled image boxes agree, which checks `P2`, the
+  rectification and the velodyne/camera transforms.
 - The non-zero position RMSE is filter lag (constant-velocity Kalman filter),
   since the inputs are exact.
-- The ID switches happen even with perfect detections and are concentrated in
-  a few sequences (0008: 44, 0018: 17, 0020: 14). They are a baseline to
-  investigate, not yet explained.
+- The remaining ID switches (0013: 8, 0019: 3, 0004: 2, 0020: 2, 0005, 0009,
+  0018: 1 each) were inspected one by one:
+  - pedestrians walking less than 1 m apart swap identities (0013, 0019):
+    real association ambiguity for a position-only tracker;
+  - objects reappearing after more than 2 s of occlusion get a new track
+    (0004, 0009), because the lost track has already been deleted;
+  - label artifacts: in 0018 an oncoming car at 16 m/s stops within one frame
+    as it leaves the image, and in 0005 a parked car jumps to 14 m/s within one
+    frame. No tracker setting should follow those.
+
+#### Initial velocity variance
+
+With the library default (`initial_velocity_variance = 4`, i.e. 2 m/s) the
+same run has 98 ID switches and an RMSE of 0.176 m, 44 of them in sequence
+0008. A new track starts at zero velocity; with a velocity prior of 2 m/s
+against a 0.5 m position noise the second observation barely moves the
+velocity, so a car at 18 m/s in the world frame outruns the 0.999 gate after
+two frames, a new track is spawned and the cycle repeats every three frames.
+Sweep over all 21 sequences (oracle detections, `lidar_only`):
+
+| initial velocity variance (m²/s²) | 4 | 25 | 100 | 225 | 400 |
+| --- | --- | --- | --- | --- | --- |
+| id switches | 98 | 31 | 18 | 17 | 20 |
+| position RMSE (m) | 0.176 | 0.116 | 0.107 | 0.106 | 0.106 |
+
+`replay` exposes `--initial-velocity-variance`, `--accel-spectral-density` and
+`--gate-squared-mahalanobis`. The library default is unchanged; it suits the
+synthetic scenarios and slow objects.
 
 Detector-based results will be added once `scripts/runpod/` has been run.
 
