@@ -69,12 +69,16 @@ impl CameraAssociationTruth {
 pub struct EvalConfig {
     /// Hard matching gate in metres.
     pub match_distance_m: f64,
+    /// Only confirmed tracks are matched (tentative and lost tracks are what
+    /// a consumer would not act on). When `false`, every output track counts.
+    pub confirmed_only: bool,
 }
 
 impl Default for EvalConfig {
     fn default() -> Self {
         EvalConfig {
             match_distance_m: 2.0,
+            confirmed_only: true,
         }
     }
 }
@@ -199,6 +203,10 @@ pub fn evaluate_mode(
         let tracks: Vec<(u64, [f64; 3])> = frame
             .tracks
             .iter()
+            .filter(|track| {
+                !config.confirmed_only
+                    || track.lifecycle == perception_core::TrackLifecycleState::Confirmed.as_str()
+            })
             .filter_map(|track| vector3(&track.position).map(|p| (track.track_id, p)))
             .collect();
         let (objects, object_classes): (Vec<(u32, [f64; 3])>, Vec<u32>) = truth_frame

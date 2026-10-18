@@ -262,7 +262,12 @@ pub fn read_output_frames(
 }
 
 /// Evaluates a replay output file against truth and writes metrics JSON.
-pub fn run_evaluate(output: &Path, truth: &Path, metrics_out: &Path) -> CliResult<()> {
+pub fn run_evaluate(
+    output: &Path,
+    truth: &Path,
+    metrics_out: &Path,
+    config: &EvalConfig,
+) -> CliResult<()> {
     let (lidar_frames, camera_frames) = read_output_frames(output)?;
     let (truth_frames, camera_truth): (Vec<GroundTruthFrame>, Vec<CameraAssociationTruth>) =
         read_truth(truth)?;
@@ -272,7 +277,7 @@ pub fn run_evaluate(output: &Path, truth: &Path, metrics_out: &Path) -> CliResul
         &truth_frames,
         &camera_truth,
         AllCounters::default(),
-        &EvalConfig::default(),
+        config,
     );
     let report = ComparisonReport {
         modes: vec![metrics],

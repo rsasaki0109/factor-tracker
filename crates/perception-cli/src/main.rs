@@ -213,6 +213,12 @@ enum Command {
         /// Metrics JSON output.
         #[arg(long, default_value = "cam-demo-out/metrics.json")]
         metrics: PathBuf,
+        /// Track-to-truth matching gate in metres.
+        #[arg(long, default_value_t = 2.0)]
+        match_distance_m: f64,
+        /// Match every output track, not only confirmed ones.
+        #[arg(long)]
+        all_tracks: bool,
     },
     /// Render an HTML report for one mode plus optional comparison metrics.
     Report {
@@ -457,7 +463,17 @@ fn run(cli: Cli) -> CliResult<()> {
             output,
             truth,
             metrics,
-        } => cam::run_evaluate(&output, &truth, &metrics),
+            match_distance_m,
+            all_tracks,
+        } => cam::run_evaluate(
+            &output,
+            &truth,
+            &metrics,
+            &perception_engine::eval::EvalConfig {
+                match_distance_m,
+                confirmed_only: !all_tracks,
+            },
+        ),
         Command::Report {
             setup,
             output,

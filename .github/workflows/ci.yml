@@ -39,6 +39,7 @@ jobs:
         run: |
           python3 -m pip install --quiet numpy
           python3 -m unittest discover -s scripts/kitti -v
+          python3 -m unittest discover -s scripts/coda -v
       - name: Run the camera+LiDAR demo
         run: cargo run -p perception-cli -- cam-demo --out-dir cam-demo-out
       - name: Run the camera+LiDAR demo with injected faults
