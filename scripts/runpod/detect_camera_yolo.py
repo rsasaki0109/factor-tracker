@@ -68,6 +68,8 @@ def main() -> None:
     model = YOLO(args.model)
 
     for seq, images, out_dir in jobs:
+        # Resume: skip images whose detections were already written.
+        images = [p for p in images if not (out_dir / f"{frame_name(p)}.txt").exists()]
         out_dir.mkdir(parents=True, exist_ok=True)
         started = time.time()
         for start in range(0, len(images), args.batch):
