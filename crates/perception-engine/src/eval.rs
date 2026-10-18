@@ -201,11 +201,13 @@ pub fn evaluate_mode(
             .iter()
             .filter_map(|track| vector3(&track.position).map(|p| (track.track_id, p)))
             .collect();
-        let objects: Vec<(u32, [f64; 3])> = truth_frame
+        let (objects, object_classes): (Vec<(u32, [f64; 3])>, Vec<u32>) = truth_frame
             .objects
             .iter()
-            .filter_map(|object| vector3(&object.position).map(|p| (object.truth_id, p)))
-            .collect();
+            .filter_map(|object| {
+                vector3(&object.position).map(|p| ((object.truth_id, p), object.class))
+            })
+            .unzip();
         gt_object_times += objects.len() as u64;
         for object in &truth_frame.objects {
             *truth_presence.entry(object.truth_id).or_insert(0) += 1;
@@ -226,7 +228,7 @@ pub fn evaluate_mode(
             if let Some(track) = frame.tracks.iter().find(|t| t.track_id == track_id) {
                 if let Some(class) = track.class_label {
                     class_total += 1;
-                    if class == objects[j].0 {
+                    if class == object_classes[j] {
                         class_correct += 1;
                     }
                 }
@@ -370,4 +372,69 @@ pub fn track_truth_map(
         }
     }
     map
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::engine::TrackOutput;
+
+    fn track(track_id: u64, position: [f64; 3], class_label: Option<u32>) -> TrackOutput {
+        TrackOutput {
+            track_id,
+            lifecycle: "confirmed".to_string(),
+            state_timestamp_ns: 0,
+            last_spatial_update_ns: Some(0),
+            last_camera_support_ns: None,
+            age_since_spatial_update_ns: 0,
+            prediction_only: false,
+            position: position.to_vec(),
+            velocity: vec![0.0; 3],
+            covariance: vec![0.0; 36],
+            class_label,
+            class_prior: None,
+            contributing_sensors: vec![1],
+            observation_times_count: 1,
+        }
+    }
+
+    #[test]
+    fn class_accuracy_compares_against_the_truth_class_not_the_truth_id() {
+        let frame = LidarFrameOutput {
+            mode: TrackingMode::LidarOnly,
+            timestamp_ns: 0,
+            tracks: vec![
+                track(1, [0.0, 0.0, 0.0], Some(4)),
+                track(2, [10.0, 0.0, 0.0], Some(7)),
+            ],
+            observations: Vec::new(),
+            associations: Vec::new(),
+            unmatched_track_ids: Vec::new(),
+        };
+        let truth = GroundTruthFrame {
+            timestamp_ns: 0,
+            objects: vec![
+                GroundTruthObject {
+                    truth_id: 7,
+                    class: 4,
+                    position: vec![0.0, 0.0, 0.0],
+                },
+                GroundTruthObject {
+                    truth_id: 4,
+                    class: 2,
+                    position: vec![10.0, 0.0, 0.0],
+                },
+            ],
+        };
+        let metrics = evaluate_mode(
+            &[frame],
+            &[],
+            &[truth],
+            &[],
+            AllCounters::default(),
+            &EvalConfig::default(),
+        );
+        assert_eq!(metrics.class_total, 2);
+        assert_eq!(metrics.class_correct, 1);
+    }
 }

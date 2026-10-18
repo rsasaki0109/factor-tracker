@@ -19,7 +19,7 @@ fn test_calibration() -> Calibration {
     Calibration {
         tracking_frame: "world".into(),
         lidar_frame: "velodyne".into(),
-        camera_frame: "cam0_rect".into(),
+        camera_frame: perception_engine::kitti::KITTI_CAMERA_FRAME.into(),
         lidar_to_reference: RigidTransform3D::identity(),
         camera_to_reference: RigidTransform3D::new(rc.transpose(), Vector3::zeros()).unwrap(),
         intrinsics: CameraIntrinsics {

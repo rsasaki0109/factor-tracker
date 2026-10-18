@@ -148,10 +148,11 @@ pub fn replay_setup(
     let (calibration, poses) = load_setup(setup_path)?;
     let inputs = read_inputs(inputs_path)?;
     let injected = inject::apply(&inputs, &options.injection);
-    let config = EngineConfig {
+    let mut config = EngineConfig {
         mode: options.mode,
         ..EngineConfig::default()
     };
+    config.tracker.frame_id = calibration.tracking_frame.clone();
     let engine = replay::run(calibration, poses, config, &injected)?;
     Ok(ReplayResult {
         lidar_frames: engine.lidar_frames().to_vec(),

@@ -37,13 +37,19 @@ use perception_core::{ClassLabel, FrameId, RigidTransform3D, SensorId, Timestamp
 
 use crate::error::{EngineError, EngineResult};
 use crate::geometry::{
-    inverse, Box3DShape, BoxDimensions, Calibration, CameraIntrinsics, PoseTrack,
+    compose, inverse, Box3DShape, BoxDimensions, Calibration, CameraIntrinsics, PoseTrack,
 };
 use crate::input::{CameraBatch, CameraDetection, EngineBatch, LidarBatch, LidarDetection};
 use crate::io::{
     CameraDetectionRecord, EngineInputRecord, LidarDetectionRecord, ShapeMetadataRecord,
     ENGINE_SCHEMA_VERSION,
 };
+
+/// Tracking frame used when ego poses are supplied.
+pub const KITTI_WORLD_FRAME: &str = "world";
+
+/// Frame id of the rectified projecting camera (`P2` / `image_02` for KITTI).
+pub const KITTI_CAMERA_FRAME: &str = "cam_rect";
 
 /// Maps KITTI class names to tracking-space ids.
 #[derive(Debug, Clone)]
@@ -79,7 +85,7 @@ impl KittiClassMap {
 pub struct KittiCalibration {
     /// `P_rect_00` (or `P2`) as a row-major `3x4` of 12 values.
     pub p_rect: [f64; 12],
-    /// `R_rect_00` as a row-major `4x4` of 16 values.
+    /// `R_rect_00` as a row-major `4x4` of 16 values (a `3x3` input is padded).
     pub r_rect: [f64; 16],
     /// `Tr_velo_to_cam` as a row-major `3x4` of 12 values.
     pub tr_velo_to_cam: [f64; 12],
@@ -97,10 +103,24 @@ impl KittiCalibration {
             if line.is_empty() {
                 continue;
             }
-            let Some((key, rest)) = line.split_once(':') else {
-                continue;
+            // Object/raw calibration files use `key: values`; the tracking
+            // benchmark files write `R_rect` and `Tr_velo_cam` without a colon.
+            let (key, rest) = match line.split_once(':') {
+                Some((key, rest)) => (key.trim(), rest),
+                None => match line.split_once(char::is_whitespace) {
+                    Some((key, rest)) => (key, rest),
+                    None => continue,
+                },
             };
-            let key = key.trim();
+            // Only known keys are parsed, so entries such as `calib_time` in the
+            // raw-data files are ignored.
+            let slot = match key {
+                "P_rect_00" | "P2" => &mut p_rect,
+                "P0" => &mut p_fallback,
+                "R_rect_00" | "R0_rect" | "R_rect" => &mut r_rect,
+                "Tr_velo_to_cam" | "Tr_velo_cam" => &mut tr_velo,
+                _ => continue,
+            };
             let values: Vec<f64> = rest
                 .split_whitespace()
                 .map(|token| {
@@ -109,14 +129,12 @@ impl KittiCalibration {
                         .map_err(|_| EngineError::data(format!("bad number '{token}' in calib")))
                 })
                 .collect::<EngineResult<Vec<_>>>()?;
-            match key {
-                "P_rect_00" | "P2" => p_rect = Some(array12(&values)?),
-                "P0" => p_fallback = Some(array12(&values)?),
-                "R_rect_00" | "R0_rect" => r_rect = Some(array16(&values)?),
-                "Tr_velo_to_cam" | "Tr_velo_cam" => tr_velo = Some(array12(&values)?),
-                _ => {}
-            }
+            *slot = Some(values);
         }
+        let p_rect = p_rect.as_deref().map(array12).transpose()?;
+        let p_fallback = p_fallback.as_deref().map(array12).transpose()?;
+        let r_rect = r_rect.as_deref().map(rect_4x4).transpose()?;
+        let tr_velo = tr_velo.as_deref().map(array12).transpose()?;
         Ok(KittiCalibration {
             p_rect: p_rect
                 .or(p_fallback)
@@ -151,7 +169,27 @@ impl KittiCalibration {
         crate::geometry::rigid_from_matrix4(&(r * tr))
     }
 
+    /// Offset of the projecting camera from rectified camera 0, expressed in
+    /// the rectified frame.
+    ///
+    /// `P_rect = K [I | t]`, so `t = K^-1 p4` where `p4` is the fourth column.
+    /// It is zero for camera 0 and about `(0.06, 0, 0)` m for KITTI `P2`.
+    pub fn camera_offset(&self) -> Vector3<f64> {
+        let p = &self.p_rect;
+        let (fx, skew, cx, fy, cy) = (p[0], p[1], p[2], p[5], p[6]);
+        let tz = p[11];
+        let ty = (p[7] - cy * tz) / fy;
+        let tx = (p[3] - skew * ty - cx * tz) / fx;
+        Vector3::new(tx, ty, tz)
+    }
+
     /// Builds the engine [`Calibration`] with the velodyne frame as reference.
+    ///
+    /// The camera frame is the rectified frame of the camera whose projection
+    /// matrix was read (`P2` when present), so the translation column of the
+    /// projection matrix becomes part of `camera_to_reference`. The returned
+    /// transform is velodyne to rectified camera 0, the frame of KITTI 3D
+    /// labels, detections and poses.
     pub fn to_calibration(
         &self,
         image_width: u32,
@@ -160,6 +198,9 @@ impl KittiCalibration {
     ) -> EngineResult<(Calibration, RigidTransform3D)> {
         let velo_to_cam = self.velo_to_cam()?;
         let cam_to_velo = inverse(&velo_to_cam);
+        // X_cam0 = X_cam - t for a point X_cam in the projecting camera frame.
+        let projecting_to_cam0 = RigidTransform3D::new(Matrix3::identity(), -self.camera_offset())
+            .map_err(|error| EngineError::data(format!("bad camera offset: {error}")))?;
         let intrinsics = CameraIntrinsics {
             fx: self.p_rect[0],
             fy: self.p_rect[5],
@@ -172,9 +213,9 @@ impl KittiCalibration {
         let calibration = Calibration {
             tracking_frame: FrameId::new("velodyne"),
             lidar_frame: FrameId::new("velodyne"),
-            camera_frame: FrameId::new("cam0_rect"),
+            camera_frame: FrameId::new(KITTI_CAMERA_FRAME),
             lidar_to_reference: RigidTransform3D::identity(),
-            camera_to_reference: cam_to_velo,
+            camera_to_reference: compose(&cam_to_velo, &projecting_to_cam0),
             intrinsics,
             near_plane,
         };
@@ -191,13 +232,27 @@ fn array12(values: &[f64]) -> EngineResult<[f64; 12]> {
     Ok(out)
 }
 
-fn array16(values: &[f64]) -> EngineResult<[f64; 16]> {
-    if values.len() != 16 {
-        return Err(EngineError::data("expected 16 calibration values"));
+/// Accepts a rectifying rotation as a `3x3` (as distributed by KITTI) or an
+/// already padded `4x4`, and returns the row-major `4x4`.
+fn rect_4x4(values: &[f64]) -> EngineResult<[f64; 16]> {
+    match values.len() {
+        16 => {
+            let mut out = [0.0; 16];
+            out.copy_from_slice(values);
+            Ok(out)
+        }
+        9 => {
+            let mut out = [0.0; 16];
+            for row in 0..3 {
+                out[row * 4..row * 4 + 3].copy_from_slice(&values[row * 3..row * 3 + 3]);
+            }
+            out[15] = 1.0;
+            Ok(out)
+        }
+        _ => Err(EngineError::data(
+            "expected 9 or 16 values for the rectifying rotation",
+        )),
     }
-    let mut out = [0.0; 16];
-    out.copy_from_slice(values);
-    Ok(out)
 }
 
 /// Parses `times.txt` (seconds per line) into timestamps.
@@ -242,12 +297,12 @@ pub fn parse_poses(text: &str) -> EngineResult<Vec<RigidTransform3D>> {
 
 /// Builds a pose track mapping the reference (velodyne) frame to world.
 ///
-/// KITTI poses are camera0-to-world, so they are composed with
-/// `camera_to_reference` (camera0-from-velodyne).
+/// KITTI poses are camera0-to-world, so they are composed with the
+/// velodyne-to-camera0 transform (`velo_to_cam`).
 pub fn build_pose_track(
     timestamps: &[Timestamp],
     camera_poses: &[RigidTransform3D],
-    cam_to_velo: &RigidTransform3D,
+    velo_to_cam: &RigidTransform3D,
     max_gap_ns: i64,
 ) -> EngineResult<PoseTrack> {
     if timestamps.len() != camera_poses.len() {
@@ -258,7 +313,7 @@ pub fn build_pose_track(
     let samples = timestamps
         .iter()
         .zip(camera_poses)
-        .map(|(timestamp, pose)| (*timestamp, crate::geometry::compose(pose, cam_to_velo)))
+        .map(|(timestamp, pose)| (*timestamp, crate::geometry::compose(pose, velo_to_cam)))
         .collect();
     PoseTrack::new(samples, max_gap_ns)
 }
@@ -346,7 +401,11 @@ pub fn parse_objects_3d(text: &str, classes: &KittiClassMap) -> EngineResult<Vec
     Ok(objects)
 }
 
-/// Parses KITTI 2D detection lines: `type trunc occ alpha x1..y2 [score]`.
+/// Parses KITTI 2D detection lines.
+///
+/// Accepted forms: `type trunc occ alpha x1..y2 [score]`, a 15-field label
+/// line (score 1.0) and a full 16-field detection line whose score is the
+/// last field.
 pub fn parse_objects_2d(text: &str, classes: &KittiClassMap) -> EngineResult<Vec<KittiObject2d>> {
     let mut objects = Vec::new();
     for (line_number, line) in text.lines().enumerate() {
@@ -369,10 +428,10 @@ pub fn parse_objects_2d(text: &str, classes: &KittiClassMap) -> EngineResult<Vec
             parse_f64(&tokens, 6, "bbox")?,
             parse_f64(&tokens, 7, "bbox")?,
         ];
-        let score = if tokens.len() > 8 {
-            parse_f64(&tokens, 8, "score")?
-        } else {
-            1.0
+        let score = match tokens.len() {
+            9 => parse_f64(&tokens, 8, "score")?,
+            n if n >= 16 => parse_f64(&tokens, 15, "score")?,
+            _ => 1.0,
         };
         objects.push(KittiObject2d {
             class_id,
@@ -489,8 +548,9 @@ pub fn prepare_sequence(
     let classes = KittiClassMap::default();
     let calibration_text = read_file(&paths.calib)?;
     let kitti_calib = KittiCalibration::parse(&calibration_text)?;
-    let (calibration, cam_to_velo) =
+    let (mut calibration, velo_to_cam) =
         kitti_calib.to_calibration(image_width, image_height, near_plane)?;
+    let cam_to_velo = inverse(&velo_to_cam);
     let timestamps = parse_times(&read_file(&paths.times)?)?;
 
     let poses = match &paths.poses {
@@ -504,12 +564,16 @@ pub fn prepare_sequence(
             Some(build_pose_track(
                 &timestamps,
                 &camera_poses[..timestamps.len()],
-                &cam_to_velo,
+                &velo_to_cam,
                 pose_max_gap_ns,
             )?)
         }
         None => None,
     };
+    // With ego poses, tracks (and therefore ground truth) live in the world frame.
+    if poses.is_some() {
+        calibration.tracking_frame = FrameId::new(KITTI_WORLD_FRAME);
+    }
 
     let mut inputs = Vec::new();
     let mut truth = Vec::new();
@@ -557,7 +621,7 @@ pub fn prepare_sequence(
                 sequence: index as u64,
                 event_time_ns: timestamp.as_nanos(),
                 arrival_time_ns: timestamp.as_nanos(),
-                frame_id: "cam0_rect".to_string(),
+                frame_id: KITTI_CAMERA_FRAME.to_string(),
                 detections: objects
                     .iter()
                     .enumerate()
@@ -575,12 +639,16 @@ pub fn prepare_sequence(
             let path = frame_file(labels_dir, index);
             if path.exists() {
                 let labels = parse_tracking_labels_3d(&read_file(&path)?, &classes)?;
+                let cam_to_tracking = match &poses {
+                    Some(poses) => compose(&poses.pose_at(*timestamp)?, &cam_to_velo),
+                    None => cam_to_velo.clone(),
+                };
                 let objects = labels
                     .iter()
                     .map(|(track_id, object)| crate::eval::GroundTruthObject {
                         truth_id: *track_id,
                         class: object.class_id.unwrap_or(0),
-                        position: cam_to_velo
+                        position: cam_to_tracking
                             .transform_position(&Vector3::new(
                                 object.location[0],
                                 object.location[1],
@@ -609,6 +677,8 @@ pub fn prepare_sequence(
 }
 
 /// Parses KITTI 3D tracking labels: `frame track_id type trunc occ alpha ...`.
+///
+/// `DontCare` regions carry track id `-1` and are skipped.
 pub fn parse_tracking_labels_3d(
     text: &str,
     classes: &KittiClassMap,
@@ -626,8 +696,13 @@ pub fn parse_tracking_labels_3d(
             ));
         }
         let track_id = tokens[1]
-            .parse::<u32>()
+            .parse::<i64>()
             .map_err(|_| EngineError::data("bad tracking id"))?;
+        if track_id < 0 || tokens[2] == "DontCare" {
+            continue;
+        }
+        let track_id =
+            u32::try_from(track_id).map_err(|_| EngineError::data("tracking id out of range"))?;
         let class_id = classes.id(tokens[2]);
         let object = KittiObject3d {
             class_id,
@@ -687,7 +762,7 @@ pub fn camera_batch(
         sensor_id: SensorId::new(sensor_id),
         sequence,
         event_time: timestamp,
-        frame_id: FrameId::new("cam0_rect"),
+        frame_id: FrameId::new(KITTI_CAMERA_FRAME),
         detections,
     })
 }
