@@ -23,10 +23,11 @@ each group.
 
 ## Association and track management
 
-- Appearance-assisted association (ReID) and feature embeddings. Measured
-  need: on the CODa crowd window, real detections give 370 ID switches versus
-  31 with oracle detections, mostly neighbouring pedestrians exchanging tracks
-  (`docs/evaluation.md`).
+- Appearance-assisted association: the cost term and per-track embeddings are
+  implemented, but on CODa (one forward camera) only 13 % of LiDAR detections
+  get an embedding and ID switches do not change (`docs/evaluation.md`).
+  Next: embeddings from all cameras around the robot, a ReID-trained model,
+  and more person detections per frame.
 - Joint probabilistic data association (JPDA) and multiple hypothesis tracking
   (MHT).
 - Learned or adaptive gating thresholds.

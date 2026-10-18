@@ -34,6 +34,14 @@ dependency. Numeric work uses `f64`.
 > are reported, with their caveats, in `docs/evaluation.md`; no other accuracy,
 > speed or benchmark number is claimed beyond `docs/algorithms.md`.
 
+### Livox Mid-360 + camera on a quadruped
+
+<p align="center">
+  <img src="assets/hero_mid360.gif" alt="perception-engine on GrandTour ETH-2: ANYmal quadruped with a Livox Mid-360 and a front camera among people in the ETH main hall" width="100%">
+</p>
+
+<p align="center"><em>An ANYmal quadruped in the ETH Zurich main hall (<a href="https://grand-tour.leggedrobotics.com">GrandTour</a> ETH-2, MIT licence): Livox Mid-360 (mounted upside down, three sweeps accumulated) and the Alphasense front camera, undistorted. Mid-360 detections come from the CODa PV-RCNN 32-beam checkpoint run on CPU (trained on an Ouster, not on Mid-360 data), camera detections from YOLO11x; camera frames arrive ~50 ms after the LiDAR and are associated at their own timestamps. No 3D ground truth exists for this recording; see <a href="docs/mid360.md"><code>docs/mid360.md</code></a>.</em></p>
+
 ## What it is
 
 - A small Rust library (`perception-core`) with two concrete trackers:
@@ -69,6 +77,7 @@ dependency. Numeric work uses `f64`.
 | Linear Kalman filter with Cholesky solves and Joseph-form updates | implemented |
 | Hungarian (Kuhn–Munkres) assignment with explicit unmatched costs | implemented |
 | Matching cascade for 3D association (recently observed tracks first; on in the engine) | implemented |
+| Appearance (ReID) cost in 3D association from per-detection embeddings (off by default) | implemented |
 | IoU gating (2D) and squared-Mahalanobis gating (3D) | implemented |
 | Class-aware gating (`None` class is compatible with everything) | implemented |
 | Track lifecycle: Tentative → Confirmed → Lost → Deleted, with recovery | implemented |
@@ -92,6 +101,9 @@ perception-engine/
   crates/perception-cli/     CLI, JSONL schemas, scenarios, reports
   scripts/kitti/             KITTI tracking conversion and multi-sequence evaluation (Python + NumPy)
   scripts/coda/              CODa (robot dataset) frame fetch, CPU LiDAR detector, conversion to engine JSONL
+  scripts/grandtour/         GrandTour (ANYmal + Livox Mid-360 + cameras) conversion to engine JSONL
+  scripts/reid/              appearance embeddings for LiDAR detections from camera crops
+  scripts/eval/              LiDAR/camera agreement for recordings without 3D ground truth
   scripts/runpod/            GPU detector runs (OpenPCDet, Ultralytics) on a RunPod pod
   docs/                      architecture, data format, algorithms, camera-lidar, datasets, evaluation
   assets/                    demo assets (hero image)

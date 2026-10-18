@@ -272,10 +272,22 @@ def detect(points: np.ndarray, sd: dict, score_threshold: float, nms_threshold: 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--ckpt", type=Path, required=True)
-    parser.add_argument("--coda-root", type=Path, required=True)
-    parser.add_argument("--sequence", required=True)
+    parser.add_argument("--coda-root", type=Path)
+    parser.add_argument("--sequence")
     parser.add_argument("--first", type=int, required=True)
     parser.add_argument("--last", type=int, required=True)
+    parser.add_argument(
+        "--scan-pattern",
+        help="any float32 x y z intensity scans, e.g. 'scans/{frame:06d}.bin' (instead of --coda-root); "
+        "outputs are named scan_<frame>.json and missing frames are skipped",
+    )
+    parser.add_argument(
+        "--z-offset",
+        type=float,
+        default=0.0,
+        help="added to point z before inference (and removed from box z) so the ground sits ~0.8 m below "
+        "the origin as for the CODa Ouster; e.g. -0.25 for points in the ANYmal base frame",
+    )
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--score-threshold", type=float, default=0.1, help="CenterHead SCORE_THRESH")
     parser.add_argument(
@@ -294,13 +306,22 @@ def main() -> None:
     sd = {k: v.float() for k, v in checkpoint["model_state"].items() if v.is_floating_point()}
     args.out.mkdir(parents=True, exist_ok=True)
     seq = args.sequence
+    if args.scan_pattern is None and (args.coda_root is None or seq is None):
+        parser.error("--coda-root and --sequence are required without --scan-pattern")
     for frame in range(args.first, args.last + 1):
-        target = args.out / f"3d_bbox_os1_{seq}_{frame}.json"
+        if args.scan_pattern:
+            scan = Path(args.scan_pattern.format(frame=frame))
+            target = args.out / f"scan_{frame:06d}.json"
+            if not scan.exists():
+                continue
+        else:
+            scan = args.coda_root / args.scan_dir / "os1" / seq / f"{args.scan_dir}_os1_{seq}_{frame}.bin"
+            target = args.out / f"3d_bbox_os1_{seq}_{frame}.json"
         if target.exists():
             continue
-        scan = args.coda_root / args.scan_dir / "os1" / seq / f"{args.scan_dir}_os1_{seq}_{frame}.bin"
         points = np.fromfile(scan, dtype=np.float32).reshape(-1, 4)
-        points = points[np.isfinite(points).all(axis=1)]
+        points = points[np.isfinite(points).all(axis=1)].copy()
+        points[:, 2] += args.z_offset
         started = time.time()
         boxes, scores, cls = detect(points, sd, args.score_threshold, args.nms_threshold)
         records = []
@@ -308,7 +329,7 @@ def main() -> None:
             name = CLASS_NAMES[c]
             records.append({
                 "classId": TO_CODA.get(name, name), "modelClass": name, "score": round(float(score), 4),
-                "cX": float(box[0]), "cY": float(box[1]), "cZ": float(box[2]),
+                "cX": float(box[0]), "cY": float(box[1]), "cZ": float(box[2]) - args.z_offset,
                 "l": float(box[3]), "w": float(box[4]), "h": float(box[5]), "r": 0.0, "p": 0.0, "y": float(box[6]),
             })
         target.write_text(json.dumps({"3dbbox": records}))

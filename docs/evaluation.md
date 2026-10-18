@@ -230,6 +230,33 @@ track is still alive (about two thirds), and re-acquisition after one or more
 missed scans. Appearance (ReID embeddings from the camera) and a
 detector-aware lifecycle are the next steps; see `ROADMAP.md`.
 
+#### Appearance (ReID) on CODa
+
+`scripts/reid/embed_detections.py` projects each LiDAR detection into the
+camera, matches it to a YOLO box of the same frame (IoU >= 0.3) and stores a
+DINOv2 ViT-S/14 embedding of the crop (140x70, frozen, no ReID training) in the
+detection's `appearance` field; the tracker adds
+`appearance_weight * (1 - cos)` to the association cost and keeps a moving
+average per track (`perception-core`, off by default).
+
+- The features separate people: cosine distance between the same person in
+  consecutive frames has median 0.165 (90th percentile 0.28), between
+  neighbours closer than 1.5 m median 0.33 (oracle detections, 1,303 / 442
+  pairs).
+- But only 13 % of the LiDAR detections get an embedding: the Ouster sees
+  360 degrees, the one forward camera about 80, and YOLO finds roughly 12 of the
+  ~90 people per frame. Even at 0-5 m only 20 % have one.
+- ID switches (real detections, score >= 0.4, same settings as the table
+  above): 370 without appearance, 373 / 372 / 364 / 387 with weights 2 / 5 / 10
+  / 20. No measurable change; two thirds of the switches happen inside the
+  camera's view, mostly between people it does not detect or crops it cannot
+  separate.
+
+So the mechanism is in place and measured, and the bottleneck is coverage,
+not the cost: appearance needs cameras around the robot (GrandTour has five)
+and person detections for most of the LiDAR objects before it can move this
+number.
+
 ## Reproducing
 
 ```sh

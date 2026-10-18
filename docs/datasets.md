@@ -189,3 +189,42 @@ python3 scripts/coda/convert_coda.py --coda-root CODa --sequence 20 --first 8640
 REPLAY_ARGS="--initial-velocity-variance 1 --accel-spectral-density 0.5" \
 EVAL_ARGS="--match-distance-m 1" scripts/kitti/evaluate_sequences.sh coda-seq coda-results 20
 ```
+
+## GrandTour (ANYmal, Livox Mid-360)
+
+[GrandTour](https://grand-tour.leggedrobotics.com) (ETH Zurich RSL, MIT
+licence, Zarr on Hugging Face `leggedrobotics/grand_tour_dataset`) is recorded
+on an ANYmal quadruped with a Livox Mid-360, a Hesai XT32, five Alphasense
+global-shutter cameras and more. It has no 3D object labels. Download a
+mission's `data/` tarballs (`tf`, `anymal_state_odometry`, `<camera>`,
+`livox_points_undistorted`) and `images/<camera>.tar`, untar them, then:
+
+```sh
+python3 scripts/grandtour/grandtour.py prepare --mission GT/2024-10-01-11-47-44 \
+    --camera alphasense_front_center --first-image 3700 --last-image 3900 --out gt-seq/eth2
+python3 scripts/runpod/detect_camera_yolo.py --image-dir gt-seq/eth2/images --out-dir det/eth2_cam
+python3 scripts/coda/detect_lidar_cpu.py --ckpt coda32_allclass_bestoracle.pth \
+    --scan-pattern 'gt-seq/eth2/scans/{frame:06d}.bin' --first 3700 --last 3900 \
+    --z-offset -0.25 --out det/eth2_lidar
+python3 scripts/grandtour/grandtour.py assemble --out gt-seq/eth2 \
+    --lidar-detections det/eth2_lidar --camera-detections det/eth2_cam --lidar-score-threshold 0.5
+REPLAY_ARGS="--initial-velocity-variance 1 --accel-spectral-density 0.5" \
+    scripts/kitti/evaluate_sequences.sh gt-seq gt-res eth2
+python3 scripts/eval/camera_consistency.py --seq-dir gt-seq/eth2
+```
+
+Conventions, each checked on the data before use:
+
+- static TF entries map base coordinates into the sensor frame
+  (`p_sensor = A_sensor p_base`, `box_base` composed in): projecting Mid-360
+  points into the camera with `A_cam A_lidar^-1` lands the floor rings and
+  pillars on the image, the opposite composition does not;
+- `anymal_state_odometry` is world-from-base (`p_odom = pose p_base`, `xyzw`
+  quaternions): two sweeps 1 s apart overlap with a median nearest-neighbour
+  distance of 5 cm, versus 1.6 m with the inverse;
+- the Alphasense cameras are equidistant fisheye and are undistorted to a
+  pinhole with the same K; on ETH-1/2/3 the HDR cameras have imprecise
+  timestamps (GMSL arrival time), so the PTP-synchronized Alphasense cameras
+  are used.
+
+See `docs/mid360.md` for what this sensor pair implies for perception.

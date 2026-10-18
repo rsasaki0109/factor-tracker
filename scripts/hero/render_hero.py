@@ -49,7 +49,7 @@ from collections import defaultdict, deque
 from pathlib import Path
 
 import numpy as np
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageEnhance, ImageFont
 
 MARGIN = 32
 SURFACE = (11, 18, 32)
@@ -92,7 +92,7 @@ def tint(color, alpha, base=PANEL):
 def load(seq_dir: Path):
     setup = json.loads((seq_dir / "setup.json").read_text())
     poses = {p["timestamp_ns"]: mat4(p["transform"]) for p in setup["poses"]}
-    lidar_inputs, camera_inputs, frame_numbers = {}, {}, {}
+    lidar_inputs, camera_inputs, frame_numbers, camera_numbers = {}, {}, {}, {}
     for line in open(seq_dir / "inputs.jsonl"):
         record = json.loads(line)
         if record["type"] == "lidar_batch":
@@ -100,6 +100,7 @@ def load(seq_dir: Path):
             frame_numbers[record["event_time_ns"]] = record["sequence"]
         elif record["type"] == "camera_batch":
             camera_inputs[record["event_time_ns"]] = record["detections"]
+            camera_numbers[record["event_time_ns"]] = record["sequence"]
     lidar_frames, camera_frames = {}, {}
     for line in open(seq_dir / "camera_assisted.outputs.jsonl"):
         record = json.loads(line)
@@ -107,7 +108,7 @@ def load(seq_dir: Path):
             lidar_frames[record["timestamp_ns"]] = record
         elif record["type"] == "camera_frame":
             camera_frames[record["timestamp_ns"]] = record
-    return setup, poses, lidar_inputs, camera_inputs, lidar_frames, camera_frames, frame_numbers
+    return setup, poses, lidar_inputs, camera_inputs, lidar_frames, camera_frames, frame_numbers, camera_numbers
 
 
 class Bev:
@@ -132,7 +133,9 @@ class Bev:
 class Renderer:
     def __init__(self, data, args):
         (self.setup, self.poses, self.lidar_inputs, self.camera_inputs, self.lidar_frames, self.camera_frames,
-         self.frame_numbers) = data
+         self.frame_numbers, self.camera_numbers) = data
+        self.camera_times = np.array(sorted(self.camera_numbers))
+        self.pose_times = np.array(sorted(self.poses))
         self.args = args
         intr = self.setup["intrinsics"]
         self.intr = intr
@@ -153,6 +156,18 @@ class Renderer:
             self.bev_box = (self.cam_box[2] + 12, 84, self.width - MARGIN, 84 + cam_h)
         self.height = self.bev_box[3] + 40
 
+    def pose_at(self, t: int) -> np.ndarray:
+        """Reference->world pose at `t`: exact sample, else interpolated (lerp + SVD)."""
+        if t in self.poses:
+            return self.poses[t]
+        k = int(np.clip(np.searchsorted(self.pose_times, t), 1, len(self.pose_times) - 1))
+        t0, t1 = self.pose_times[k - 1], self.pose_times[k]
+        a = float(np.clip((t - t0) / (t1 - t0), 0.0, 1.0))
+        m = (1 - a) * self.poses[t0] + a * self.poses[t1]
+        u, _, vt = np.linalg.svd(m[:3, :3])
+        m[:3, :3] = u @ vt
+        return m
+
     def project(self, points_velo):
         cam = (self.ref_to_cam[:3, :3] @ points_velo.T).T + self.ref_to_cam[:3, 3]
         if np.any(cam[:, 2] < 0.5):
@@ -162,8 +177,14 @@ class Renderer:
         return np.stack([self.cam_box[0] + u * self.sx, self.cam_box[1] + v * self.sx], axis=1)
 
     def frame(self, t, trails, camera_hits):
-        # The LiDAR batch sequence number is the dataset frame number.
+        # The LiDAR batch sequence number is the dataset frame number; the
+        # image is the camera batch nearest in time (cameras may run on their
+        # own clock).
         frame_index = self.frame_numbers[t]
+        camera_t = t
+        if len(self.camera_times):
+            camera_t = int(self.camera_times[np.argmin(np.abs(self.camera_times - t))])
+        image_index = self.camera_numbers.get(camera_t, frame_index)
         W = self.width
         img = Image.new("RGB", (W, self.height), SURFACE)
         d = ImageDraw.Draw(img)
@@ -173,7 +194,7 @@ class Renderer:
 
         lidar = self.lidar_frames[t]
         tracks = {tr["track_id"]: tr for tr in lidar["tracks"] if tr["lifecycle"] == "confirmed"}
-        world_to_velo = np.linalg.inv(self.poses[t])
+        world_to_velo = np.linalg.inv(self.pose_at(t))
 
         def to_velo(p):
             return world_to_velo[:3, :3] @ np.asarray(p) + world_to_velo[:3, 3]
@@ -188,13 +209,15 @@ class Renderer:
                     shapes[assoc["track_id"]] = np.array(det["shape"]["corners"]).reshape(8, 3)
 
         # ---- camera panel -------------------------------------------------
-        image = Image.open(self.args.image_pattern.format(frame=frame_index))
+        image = Image.open(self.args.image_pattern.format(frame=image_index))
         image = image.convert("RGB").resize((self.cam_box[2] - self.cam_box[0], self.cam_box[3] - self.cam_box[1]), Image.LANCZOS)
+        if self.args.brightness != 1.0:
+            image = ImageEnhance.Brightness(image).enhance(self.args.brightness)
         image = Image.blend(image, Image.new("RGB", image.size, SURFACE), 0.18)
         img.paste(image, self.cam_box[:2])
         overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
         o = ImageDraw.Draw(overlay)
-        for det in self.camera_inputs.get(t, []):
+        for det in self.camera_inputs.get(camera_t, []):
             x1, y1, x2, y2 = (v * self.sx for v in det["bbox"])
             o.rectangle((self.cam_box[0] + x1, self.cam_box[1] + y1, self.cam_box[0] + x2, self.cam_box[1] + y2),
                         outline=(241, 245, 249, 150), width=1)
@@ -317,7 +340,7 @@ class Renderer:
             lx += d.textlength(LEGEND_NAME[name], font=F_SMALL) + 32
         d.text((lx + 4, ly), "filled = camera-associated · ring = 2σ", font=F_SMALL, fill=TEXT_3)
 
-        camera = self.camera_frames.get(t, {})
+        camera = self.camera_frames.get(camera_t, {})
         matched = sum(1 for m in camera.get("matches", []) if m["accepted"])
         status = f"frame {frame_index:04d} · {len(tracks)} confirmed tracks · {matched} camera associations"
         d.text((MARGIN, self.height - 28), status, font=F_SMALL, fill=TEXT_2)
@@ -343,6 +366,7 @@ PRESETS = {
         "canvas_width": 1000,
         "label_range": 1000.0,
         "min_tag_height": 0.0,
+        "brightness": 1.0,
     },
     "coda": {
         "image_pattern": "{root}/2d_rect/cam0/{seq}/2d_rect_cam0_{seq}_{{frame}}.png",
@@ -360,6 +384,25 @@ PRESETS = {
         "canvas_width": 1200,
         "label_range": 8.0,
         "min_tag_height": 90.0,
+        "brightness": 1.0,
+    },
+    "grandtour": {
+        "image_pattern": "{root}/images/{{frame:06d}}.jpg",
+        "scan_pattern": "{root}/scans/{{frame:06d}}.bin",
+        "subtitle": "GrandTour {seq} · ANYmal quadruped · Livox Mid-360 + Alphasense camera",
+        "attribution": "GrandTour dataset: Frey, Tuna et al., MIT licence",
+        "lidar_name": "Livox Mid-360",
+        "ego_name": "robot",
+        "ego_size": (0.45, -0.45, 0.27),
+        "legend": ("pedestrian", "cyclist", "vehicle"),
+        "forward": (-3.0, 17.0),
+        "lateral": 8.0,
+        "ruler_step": 5,
+        "bev_height": 470,
+        "canvas_width": 1240,
+        "label_range": 8.0,
+        "min_tag_height": 70.0,
+        "brightness": 2.2,
     },
 }
 
@@ -394,6 +437,7 @@ def main():
     parser.add_argument("--width", type=int, default=760, help="scale the GIF to this width (0 = no scaling)")
     parser.add_argument("--canvas-width", type=int)
     parser.add_argument("--subtitle", help="line under the title (default: dataset preset)")
+    parser.add_argument("--brightness", type=float, help="image brightness gain")
     parser.add_argument("--label-range", type=float, help="label bird's-eye tracks within this range (m)")
     parser.add_argument("--min-tag-height", type=float, help="tag camera boxes at least this tall (px)")
     parser.add_argument("--colors", type=int, default=80)
@@ -410,6 +454,7 @@ def main():
     data = load(args.seq_dir)
     renderer = Renderer(data, args)
     lidar_frames, camera_frames = data[4], data[5]
+    camera_times = sorted(camera_frames)
     times = sorted(lidar_frames)
     trails = defaultdict(lambda: deque(maxlen=args.trail))
     camera_hits = {}
@@ -418,9 +463,11 @@ def main():
     for index, t in enumerate(times):
         for tr in lidar_frames[t]["tracks"]:
             trails[tr["track_id"]].append(tr["position"])
-        for m in camera_frames.get(t, {}).get("matches", []):
-            if m["accepted"]:
-                camera_hits[m["track_id"]] = t
+        # Camera frames up to this LiDAR frame (cameras may run on their own clock).
+        while camera_times and camera_times[0] <= t + 60_000_000:
+            for m in camera_frames[camera_times.pop(0)].get("matches", []):
+                if m["accepted"]:
+                    camera_hits[m["track_id"]] = t
         if index < args.start:
             continue
         if rendered >= args.frames:
