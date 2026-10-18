@@ -78,6 +78,8 @@ dependency. Numeric work uses `f64`.
 | Hungarian (Kuhn–Munkres) assignment with explicit unmatched costs | implemented |
 | Matching cascade for 3D association (recently observed tracks first; on in the engine) | implemented |
 | Appearance (ReID) cost in 3D association from per-detection embeddings (off by default) | implemented |
+| Birth suppression next to confirmed tracks (`min_birth_distance_m`, off by default) | implemented |
+| Robot-centric evaluation zone (range and bearing around the robot) | implemented |
 | IoU gating (2D) and squared-Mahalanobis gating (3D) | implemented |
 | Class-aware gating (`None` class is compatible with everything) | implemented |
 | Track lifecycle: Tentative → Confirmed → Lost → Deleted, with recovery | implemented |

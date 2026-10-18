@@ -257,6 +257,58 @@ not the cost: appearance needs cameras around the robot (GrandTour has five)
 and person detections for most of the LiDAR objects before it can move this
 number.
 
+### Robot-centric evaluation (CODa)
+
+For a robot, an identity mistake 25 m away matters far less than one in front
+of it. `evaluate --zone-range-m R --zone-half-angle-deg A --setup setup.json`
+scores only ground truth within `R` metres and `A` degrees of the robot's +x
+axis (positions mapped back to the robot frame with the ego poses). The
+front zone below (8 m, +-40 degrees) is roughly the forward camera's view and
+the robot's path; real LiDAR detections (score >= 0.4), pedestrian motion
+prior, 1 m gate, `lidar_only`, ID switches (coverage):
+
+| | 5 m, +-40 deg | 8 m, +-40 deg | 8 m, all around | whole range |
+| --- | --- | --- | --- | --- |
+| oracle detections | 0 | 2 | 2 | 31 |
+| real detections | 12 | 43 (0.993) | 65 (0.959) | 370 (0.939) |
+| + appearance, weight 10 | 12 | 37 (0.994) | 59 (0.960) | 364 (0.938) |
+| + birth suppression 1.0 m | 16 | 41 (0.987) | 62 (0.949) | 316 (0.930) |
+| + both | 14 | **26** (0.984) | **41** (0.949) | 314 (0.929) |
+
+The front zone has more switches per object than the whole range (63 vs 25
+per 1,000 object-frames) although the detector is best there (pedestrians
+0-8 m ahead: recall 0.91, precision 0.89, median position error 0.09 m).
+
+What was tried and what it showed:
+
+- **Simulated detector errors on the oracle boxes.** Position noise
+  (sigma 0.18 m) and 20 % random misses together give 5 front-zone / 95 total
+  switches, far from the real 43 / 370. 19 % extra detections placed 0.4-1 m
+  from real people give 849 total; placed at random, 199. Most real false
+  positives are of the first kind: 62 % lie 0.5-1.2 m from a person, and 45 %
+  are a second detection of a person who is already detected.
+- **Birth suppression** (`min_birth_distance_m`, off by default): an
+  unassociated detection closer than the distance to a confirmed track does
+  not start a new one. -15 % switches over the whole range on CODa; on KITTI
+  cars (oracle) it costs 15 -> 16 switches and 0.981 -> 0.969 coverage, so it
+  is a setting for pedestrian crowds, not a default.
+- **Appearance + birth suppression** is the only combination that moved the
+  front zone (43 -> 26-30 for birth 1.0-1.2 m and weights 5-10). It is
+  sensitive: birth 0.8 m or weight 20 lose the gain, and the 5 m zone gets
+  slightly worse (12 -> 14). This is one 16 s window with 43 front-zone
+  events; it needs more data before it becomes a recommendation.
+- **No effect or worse** (code not kept unless noted): applying appearance
+  only to ambiguous pairs (no measurable difference, reverted); a LiDAR-only
+  identity cue from the point-cloud height in the box (same person |dh|
+  median 0.02 m vs neighbours 0.08 m, but noisy; worse at every weight
+  tested); dropping LiDAR detections the camera does not confirm (removes
+  1,737 true and 476 false pedestrians: YOLO misses people in the crowd);
+  centre-distance NMS between pedestrian detections (radius 0.5 -> 0.8 m:
+  precision 0.89 -> 0.91, recall 0.82 -> 0.75; no consistent gain in
+  switches); merging confirmed
+  tracks that stay within 0.3-0.6 m (removes real neighbours, reverted);
+  merging pedestrian + scooter boxes of riders (38 merges, no effect).
+
 ## Reproducing
 
 ```sh

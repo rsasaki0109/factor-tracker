@@ -53,6 +53,8 @@ pub struct TrackerOverrides {
     pub appearance_weight: Option<f64>,
     /// Hard gate on the appearance cosine distance.
     pub appearance_max_distance: Option<f64>,
+    /// Minimum distance (m) from a confirmed track for a new track; 0 disables.
+    pub min_birth_distance_m: Option<f64>,
 }
 
 /// Parses a mode string.
@@ -192,6 +194,9 @@ pub fn replay_setup(
     if let Some(value) = overrides.appearance_max_distance {
         config.tracker.appearance_max_distance = Some(value);
     }
+    if let Some(value) = overrides.min_birth_distance_m {
+        config.tracker.min_birth_distance_m = (value > 0.0).then_some(value);
+    }
     let engine = replay::run(calibration, poses, config, &injected)?;
     Ok(ReplayResult {
         lidar_frames: engine.lidar_frames().to_vec(),
@@ -277,10 +282,19 @@ pub fn run_evaluate(
     truth: &Path,
     metrics_out: &Path,
     config: &EvalConfig,
+    zone: Option<(&perception_engine::eval::EvalZone, Option<&Path>)>,
 ) -> CliResult<()> {
     let (lidar_frames, camera_frames) = read_output_frames(output)?;
-    let (truth_frames, camera_truth): (Vec<GroundTruthFrame>, Vec<CameraAssociationTruth>) =
+    let (mut truth_frames, camera_truth): (Vec<GroundTruthFrame>, Vec<CameraAssociationTruth>) =
         read_truth(truth)?;
+    if let Some((zone, setup)) = zone {
+        let poses = match setup {
+            Some(setup) => load_setup(setup)?.1,
+            None => None,
+        };
+        truth_frames =
+            perception_engine::eval::filter_truth_to_zone(&truth_frames, poses.as_ref(), zone);
+    }
     let metrics = evaluate_mode(
         &lidar_frames,
         &camera_frames,

@@ -83,6 +83,72 @@ impl Default for EvalConfig {
     }
 }
 
+/// A robot-centric evaluation zone: ground truth outside it is dropped before
+/// matching, so metrics describe what matters to the robot (nearby objects,
+/// ahead of it) rather than the whole sensor range.
+///
+/// The zone is defined in the reference frame (x forward, y left, as for the
+/// KITTI velodyne, the CODa Ouster and the GrandTour base frame).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EvalZone {
+    /// Maximum horizontal distance from the reference origin, metres.
+    pub max_range_m: f64,
+    /// Maximum absolute bearing from the +x axis, radians (`PI` = all around).
+    pub max_bearing_rad: f64,
+}
+
+impl EvalZone {
+    /// Whether a reference-frame position is inside the zone.
+    pub fn contains(&self, position: &nalgebra::Vector3<f64>) -> bool {
+        position.x.hypot(position.y) <= self.max_range_m
+            && position.y.atan2(position.x).abs() <= self.max_bearing_rad
+    }
+}
+
+/// Keeps only the ground truth inside `zone`. Truth positions are in the
+/// tracking frame; with `poses` (reference to world) they are mapped back to
+/// the reference frame at their own timestamp, without poses the tracking
+/// frame is the reference frame. Frames whose pose is unavailable are dropped.
+pub fn filter_truth_to_zone(
+    truth: &[GroundTruthFrame],
+    poses: Option<&crate::geometry::PoseTrack>,
+    zone: &EvalZone,
+) -> Vec<GroundTruthFrame> {
+    truth
+        .iter()
+        .filter_map(|frame| {
+            let world_to_reference = match poses {
+                Some(poses) => Some(crate::geometry::inverse(
+                    &poses
+                        .pose_at(perception_core::Timestamp::from_nanos(frame.timestamp_ns))
+                        .ok()?,
+                )),
+                None => None,
+            };
+            let objects = frame
+                .objects
+                .iter()
+                .filter(|object| {
+                    let Some(p) = vector3(&object.position) else {
+                        return false;
+                    };
+                    let p = nalgebra::Vector3::new(p[0], p[1], p[2]);
+                    let p = match &world_to_reference {
+                        Some(t) => t.transform_position(&p),
+                        None => p,
+                    };
+                    zone.contains(&p)
+                })
+                .cloned()
+                .collect();
+            Some(GroundTruthFrame {
+                timestamp_ns: frame.timestamp_ns,
+                objects,
+            })
+        })
+        .collect()
+}
+
 /// Metrics for one tracking mode.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ModeMetrics {
@@ -404,6 +470,31 @@ mod tests {
             contributing_sensors: vec![1],
             observation_times_count: 1,
         }
+    }
+
+    #[test]
+    fn zone_keeps_nearby_objects_ahead_of_the_robot() {
+        let zone = EvalZone {
+            max_range_m: 5.0,
+            max_bearing_rad: 45f64.to_radians(),
+        };
+        let object = |truth_id, x: f64, y: f64| GroundTruthObject {
+            truth_id,
+            class: 2,
+            position: vec![x, y, 0.0],
+        };
+        let frames = vec![GroundTruthFrame {
+            timestamp_ns: 0,
+            objects: vec![
+                object(1, 3.0, 1.0),  // ahead, near
+                object(2, 3.0, 4.0),  // near but 53 degrees to the left
+                object(3, -2.0, 0.0), // behind
+                object(4, 9.0, 0.0),  // ahead but too far
+            ],
+        }];
+        let kept = filter_truth_to_zone(&frames, None, &zone);
+        let ids: Vec<u32> = kept[0].objects.iter().map(|o| o.truth_id).collect();
+        assert_eq!(ids, vec![1]);
     }
 
     #[test]

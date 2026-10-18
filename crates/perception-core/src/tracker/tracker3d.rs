@@ -93,6 +93,11 @@ pub struct Cartesian3DTrackerConfig {
     /// Optional hard gate on the cosine distance `1 - cos`; pairs above it are
     /// never associated (only when both embeddings exist).
     pub appearance_max_distance: Option<f64>,
+    /// When set, an unassociated observation closer than this (metres, 3D)
+    /// to a confirmed track does not start a new track. Detectors often
+    /// report a second box next to a person; such boxes otherwise become
+    /// tracks that later take the person's own detections. `None` disables it.
+    pub min_birth_distance_m: Option<f64>,
 }
 
 impl Default for Cartesian3DTrackerConfig {
@@ -108,6 +113,7 @@ impl Default for Cartesian3DTrackerConfig {
             appearance_weight: 0.0,
             appearance_momentum: 0.9,
             appearance_max_distance: None,
+            min_birth_distance_m: None,
         }
     }
 }
@@ -149,6 +155,11 @@ impl Cartesian3DTrackerConfig {
         if matches!(self.appearance_max_distance, Some(d) if !d.is_finite() || d <= 0.0) {
             return Err(InputError::InvalidConfig {
                 reason: "appearance_max_distance must be finite and > 0",
+            });
+        }
+        if matches!(self.min_birth_distance_m, Some(d) if !d.is_finite() || d <= 0.0) {
+            return Err(InputError::InvalidConfig {
+                reason: "min_birth_distance_m must be finite and > 0",
             });
         }
         if matches!(self.recent_track_window_ns, Some(window) if window <= 0) {
@@ -644,10 +655,27 @@ impl Cartesian3DTracker {
             };
         }
 
+        let confirmed_positions: Vec<Vector3<f64>> = match self.config.min_birth_distance_m {
+            Some(_) => self
+                .tracks
+                .iter()
+                .filter(|track| track.lifecycle.state() == TrackLifecycleState::Confirmed)
+                .map(|track| track.filter.state().fixed_rows::<3>(0).into_owned())
+                .collect(),
+            None => Vec::new(),
+        };
         for &j in &assignment.unmatched_columns {
             // 3D position observations carry no detection score in this
             // version, so `new_track_score_threshold` does not apply here.
             let observation = &batch.observations[j];
+            if let Some(min_distance) = self.config.min_birth_distance_m {
+                if confirmed_positions
+                    .iter()
+                    .any(|p| (p - observation.position).norm() < min_distance)
+                {
+                    continue;
+                }
+            }
             let track_id = self.spawn_track(observation, batch.timestamp, batch.sensor_id)?;
             associations[j] = ObservationAssociation {
                 observation_index: j,
@@ -878,6 +906,39 @@ mod tests {
         };
         assert_eq!(run(0.0), Some(TrackId::new(1)));
         assert_eq!(run(10.0), Some(TrackId::new(2)));
+    }
+
+    #[test]
+    fn no_new_track_next_to_a_confirmed_one() {
+        let mut config = config();
+        config.min_birth_distance_m = Some(1.0);
+        let mut tracker = Cartesian3DTracker::new(config).unwrap();
+        // One confirmed track (confirm_min_observation_times = 1).
+        tracker
+            .process_batch(&batch(1, 0, 0, vec![observation(0.0, 0.0, 0.0)]))
+            .unwrap();
+        let (_, report) = tracker
+            .process_batch_reported(&batch(
+                1,
+                1,
+                100_000_000,
+                vec![
+                    observation(0.05, 0.0, 0.0), // updates the track
+                    observation(0.6, 0.0, 0.0),  // a second box next to it: no new track
+                    observation(5.0, 0.0, 0.0),  // far away: new track
+                ],
+            ))
+            .unwrap();
+        let outcomes: Vec<ObservationOutcome> =
+            report.associations.iter().map(|a| a.outcome).collect();
+        assert_eq!(
+            outcomes,
+            vec![
+                ObservationOutcome::Updated,
+                ObservationOutcome::Unmatched,
+                ObservationOutcome::Spawned
+            ]
+        );
     }
 
     #[test]

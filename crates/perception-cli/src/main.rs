@@ -207,6 +207,9 @@ enum Command {
         /// Hard gate on the appearance cosine distance.
         #[arg(long)]
         appearance_max_distance: Option<f64>,
+        /// Do not start tracks closer than this (m) to a confirmed track; 0 disables.
+        #[arg(long)]
+        min_birth_distance_m: Option<f64>,
     },
     /// Evaluate replay outputs against ground truth.
     Evaluate {
@@ -225,6 +228,17 @@ enum Command {
         /// Match every output track, not only confirmed ones.
         #[arg(long)]
         all_tracks: bool,
+        /// Only score ground truth within this range of the robot (metres).
+        #[arg(long)]
+        zone_range_m: Option<f64>,
+        /// Only score ground truth within this bearing of the robot's +x axis
+        /// (degrees, default 180 = all around). Used with --zone-range-m.
+        #[arg(long, default_value_t = 180.0)]
+        zone_half_angle_deg: f64,
+        /// Setup JSON with the ego poses used to place the zone (required for
+        /// world-frame tracking).
+        #[arg(long)]
+        setup: Option<PathBuf>,
     },
     /// Render an HTML report for one mode plus optional comparison metrics.
     Report {
@@ -441,6 +455,7 @@ fn run(cli: Cli) -> CliResult<()> {
             recent_track_window_ns,
             appearance_weight,
             appearance_max_distance,
+            min_birth_distance_m,
         } => {
             let injection = cam::injection_from_flags(
                 lidar_delay_ns,
@@ -458,6 +473,7 @@ fn run(cli: Cli) -> CliResult<()> {
                 recent_track_window_ns,
                 appearance_weight,
                 appearance_max_distance,
+                min_birth_distance_m,
             };
             cam::run_replay(
                 &setup,
@@ -475,15 +491,25 @@ fn run(cli: Cli) -> CliResult<()> {
             metrics,
             match_distance_m,
             all_tracks,
-        } => cam::run_evaluate(
-            &output,
-            &truth,
-            &metrics,
-            &perception_engine::eval::EvalConfig {
-                match_distance_m,
-                confirmed_only: !all_tracks,
-            },
-        ),
+            zone_range_m,
+            zone_half_angle_deg,
+            setup,
+        } => {
+            let zone = zone_range_m.map(|max_range_m| perception_engine::eval::EvalZone {
+                max_range_m,
+                max_bearing_rad: zone_half_angle_deg.to_radians(),
+            });
+            cam::run_evaluate(
+                &output,
+                &truth,
+                &metrics,
+                &perception_engine::eval::EvalConfig {
+                    match_distance_m,
+                    confirmed_only: !all_tracks,
+                },
+                zone.as_ref().map(|zone| (zone, setup.as_deref())),
+            )
+        }
         Command::Report {
             setup,
             output,
