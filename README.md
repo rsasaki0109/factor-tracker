@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/hero.gif" alt="perception-engine tracking pedestrians and cars on KITTI tracking sequence 0019: projected 3D tracks matched to 2D camera boxes (top) and LiDAR tracks with uncertainty rings and trails in a bird's-eye view (bottom)" width="100%">
+  <img src="assets/hero.gif" alt="perception-engine on KITTI tracking sequence 0019: camera frames with YOLO detections and projected 3D track boxes (top), Velodyne scan with LiDAR tracks, trails and uncertainty rings in a bird's-eye view (bottom)" width="100%">
 </p>
 
 <h1 align="center">perception-engine</h1>
@@ -11,7 +11,7 @@
   <img src="https://img.shields.io/badge/dependencies-nalgebra%20%7C%20thiserror-informational.svg" alt="Dependencies: nalgebra, thiserror">
 </p>
 
-<p align="center"><em>KITTI tracking sequence 0019 with the ground-truth labels used as oracle detections and OXTS-derived ego poses: this shows the engine's frames, projection and tracking on real geometry, not detector performance. No camera pixels are shown. The animation is derived from KITTI data and is licensed under <a href="https://creativecommons.org/licenses/by-nc-sa/3.0/">CC BY-NC-SA 3.0</a> (Geiger et al.), unlike the code. Rendered with <code>scripts/hero/render_hero.py</code>; the synthetic-demo image is <a href="assets/hero.svg"><code>assets/hero.svg</code></a>.</em></p>
+<p align="center"><em>KITTI tracking sequence 0019: real camera frames and Velodyne scans. Camera detections are YOLO11x (COCO) output; LiDAR detections are the ground-truth 3D boxes used as oracle detections until a LiDAR detector is run (<code>scripts/runpod/</code>); boxes, IDs, trails and uncertainty rings are the engine's <code>camera_assisted</code> tracks. Ego poses come from OXTS. The animation contains KITTI data and is licensed under <a href="https://creativecommons.org/licenses/by-nc-sa/3.0/">CC BY-NC-SA 3.0</a> (Geiger et al.), unlike the code. Rendered with <code>scripts/hero/render_hero.py</code>; the synthetic-demo image is <a href="assets/hero.svg"><code>assets/hero.svg</code></a>.</em></p>
 
 ---
 

@@ -81,6 +81,13 @@ scripts/kitti/evaluate_sequences.sh out/sequences out/results
   entries are dropped.
 - `image_size.txt` is read from the first `image_02` PNG when present.
 
+To look at a few frames without downloading the full image (~16 GB) or
+Velodyne (~37 GB) archives, `scripts/kitti/fetch_frames.py` extracts a frame
+range of one sequence from the official ZIPs with HTTP range requests.
+
+`--oracle` and `--detections-root` can be combined: sensors present under
+`--detections-root` use the detector output, the others the labels.
+
 ## Obtaining detection results
 
 There is no requirement to train a detector. Two reproducible options:

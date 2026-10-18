@@ -13,7 +13,7 @@ Output, one directory per sequence:
 
     <out>/0000/calib.txt  times.txt  poses.txt  image_size.txt
     <out>/0000/labels_lidar/000000.txt ...
-    <out>/0000/detections_lidar/000000.txt ...   (oracle or detector output)
+    <out>/0000/detections_lidar/000000.txt ...   (detector output, or oracle labels)
     <out>/0000/detections_camera/000000.txt ...
 
 The tracking benchmark ships no per-frame timestamps, so `times.txt` uses the
@@ -45,8 +45,6 @@ def write_frames(directory: Path, frame_count: int, lines_by_frame: dict[int, li
 
 def copy_detections(source: Path, target: Path, frame_count: int) -> None:
     """Copies detector output, writing an empty file for frames without one."""
-    if not source.is_dir():
-        raise SystemExit(f"missing detection directory {source}")
     target.mkdir(parents=True, exist_ok=True)
     for frame in range(frame_count):
         name = f"{frame:06d}.txt"
@@ -82,24 +80,24 @@ def convert_sequence(args: argparse.Namespace, sequence: str) -> None:
     if labels is not None:
         write_frames(out / "labels_lidar", frame_count, labels)
 
-    if args.detections_root is not None:
-        for sensor in ("lidar", "camera"):
-            copy_detections(
-                args.detections_root / sensor / sequence,
-                out / f"detections_{sensor}",
-                frame_count,
-            )
-    elif args.oracle:
+    oracle_objects = None
+    if args.oracle:
         if labels is None:
             raise SystemExit(f"--oracle needs labels, {label_path} is missing")
-        objects = {
+        # Tracking labels are image_02 boxes plus camera 0 3D boxes, so the
+        # same object lines serve as camera and LiDAR oracle detections.
+        oracle_objects = {
             frame: [kitti_tools.label_to_object_line(line) for line in lines]
             for frame, lines in labels.items()
         }
-        # Tracking labels are image_02 boxes plus camera 0 3D boxes, so the
-        # same object lines serve as camera and LiDAR oracle detections.
-        write_frames(out / "detections_lidar", frame_count, objects)
-        write_frames(out / "detections_camera", frame_count, objects)
+    for sensor in ("lidar", "camera"):
+        source = args.detections_root / sensor / sequence if args.detections_root else None
+        if source is not None and source.is_dir():
+            copy_detections(source, out / f"detections_{sensor}", frame_count)
+        elif oracle_objects is not None:
+            write_frames(out / f"detections_{sensor}", frame_count, oracle_objects)
+        elif source is not None:
+            raise SystemExit(f"missing detection directory {source}")
 
     print(f"{sequence}: {frame_count} frames, image {width}x{height}")
 
@@ -110,14 +108,15 @@ def main() -> None:
     parser.add_argument("--split", default="training")
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--sequences", nargs="*", help="e.g. 0000 0001 (default: all)")
-    source = parser.add_mutually_exclusive_group()
-    source.add_argument(
+    parser.add_argument(
         "--detections-root",
         type=Path,
         help="detector output with lidar/<seq>/<frame>.txt and camera/<seq>/<frame>.txt",
     )
-    source.add_argument(
-        "--oracle", action="store_true", help="use the labels as oracle detections"
+    parser.add_argument(
+        "--oracle",
+        action="store_true",
+        help="use the labels as oracle detections (for every sensor missing from --detections-root)",
     )
     args = parser.parse_args()
 
