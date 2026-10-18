@@ -90,7 +90,12 @@ impl Default for EngineConfig {
     fn default() -> Self {
         EngineConfig {
             mode: TrackingMode::CameraAssociated,
-            tracker: Cartesian3DTrackerConfig::default(),
+            tracker: Cartesian3DTrackerConfig {
+                // LiDAR-only position updates at ~10 Hz: tracks updated in the
+                // previous scan are associated before coasting ones.
+                recent_track_window_ns: Some(150_000_000),
+                ..Cartesian3DTrackerConfig::default()
+            },
             camera_association: CameraAssociationConfig::default(),
             class_evidence: ClassEvidenceConfig::default(),
             reorder: ReorderConfig::default(),

@@ -47,6 +47,8 @@ pub struct TrackerOverrides {
     pub accel_spectral_density: Option<f64>,
     /// Squared-Mahalanobis association gate.
     pub gate_squared_mahalanobis: Option<f64>,
+    /// Matching-cascade window in nanoseconds; `Some(0)` disables the cascade.
+    pub recent_track_window_ns: Option<i64>,
 }
 
 /// Parses a mode string.
@@ -176,6 +178,9 @@ pub fn replay_setup(
     }
     if let Some(value) = overrides.gate_squared_mahalanobis {
         config.tracker.gate_squared_mahalanobis = value;
+    }
+    if let Some(value) = overrides.recent_track_window_ns {
+        config.tracker.recent_track_window_ns = (value > 0).then_some(value);
     }
     let engine = replay::run(calibration, poses, config, &injected)?;
     Ok(ReplayResult {

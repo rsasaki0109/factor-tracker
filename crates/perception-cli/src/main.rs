@@ -198,6 +198,9 @@ enum Command {
         /// Override the tracker's squared-Mahalanobis gate.
         #[arg(long)]
         gate_squared_mahalanobis: Option<f64>,
+        /// Override the matching-cascade window in nanoseconds (0 disables it).
+        #[arg(long)]
+        recent_track_window_ns: Option<i64>,
     },
     /// Evaluate replay outputs against ground truth.
     Evaluate {
@@ -423,6 +426,7 @@ fn run(cli: Cli) -> CliResult<()> {
             initial_velocity_variance,
             accel_spectral_density,
             gate_squared_mahalanobis,
+            recent_track_window_ns,
         } => {
             let injection = cam::injection_from_flags(
                 lidar_delay_ns,
@@ -437,6 +441,7 @@ fn run(cli: Cli) -> CliResult<()> {
                 initial_velocity_variance,
                 accel_spectral_density,
                 gate_squared_mahalanobis,
+                recent_track_window_ns,
             };
             cam::run_replay(
                 &setup,

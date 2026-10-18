@@ -30,7 +30,7 @@ use std::collections::BTreeMap;
 
 use nalgebra::{SMatrix, SVector, Vector3};
 
-use crate::assignment::linear_assignment;
+use crate::assignment::{linear_assignment, Assignment};
 use crate::association::{classes_compatible, mahalanobis_association_cost};
 use crate::error::{check_timestamp_order, InputError, TrackerError};
 use crate::filter::KalmanFilter;
@@ -73,6 +73,15 @@ pub struct Cartesian3DTrackerConfig {
     ///
     /// The prior is never a hard gate; the spatial gate always applies.
     pub class_prior_penalty: f64,
+    /// Two-stage association (a matching cascade). When set, tracks observed
+    /// within this window before the batch are associated first and the
+    /// remaining tracks only compete for the observations left over.
+    ///
+    /// Without it, a coasting track whose covariance has grown has a smaller
+    /// squared Mahalanobis distance than a freshly updated track at the same
+    /// place, so two tracks on one object can take the observation from each
+    /// other in turn. `None` keeps a single assignment over all tracks.
+    pub recent_track_window_ns: Option<i64>,
 }
 
 impl Default for Cartesian3DTrackerConfig {
@@ -84,6 +93,7 @@ impl Default for Cartesian3DTrackerConfig {
             initial_velocity_variance: 4.0,
             gate_squared_mahalanobis: DEFAULT_GATE_SQUARED_MAHALANOBIS,
             class_prior_penalty: 8.0,
+            recent_track_window_ns: None,
         }
     }
 }
@@ -110,6 +120,11 @@ impl Cartesian3DTrackerConfig {
         if !self.class_prior_penalty.is_finite() || self.class_prior_penalty < 0.0 {
             return Err(InputError::InvalidConfig {
                 reason: "class_prior_penalty must be finite and >= 0",
+            });
+        }
+        if matches!(self.recent_track_window_ns, Some(window) if window <= 0) {
+            return Err(InputError::InvalidConfig {
+                reason: "recent_track_window_ns must be > 0",
             });
         }
         Ok(())
@@ -210,6 +225,59 @@ struct Track3D {
     last_update_sensor: Option<SensorId>,
     contributing_sensors: Vec<SensorId>,
     updated_this_batch: bool,
+}
+
+/// Assigns the rows flagged `first` before the others: stage one solves
+/// `first` rows against all columns, stage two the remaining rows against the
+/// columns stage one left unmatched.
+fn cascade_assignment(
+    costs: &[Vec<f64>],
+    num_columns: usize,
+    first: &[bool],
+    unmatched_row_cost: f64,
+) -> Result<Assignment, crate::error::NumericError> {
+    let (stage_one_rows, stage_two_rows): (Vec<usize>, Vec<usize>) =
+        (0..costs.len()).partition(|&i| first[i]);
+    let stage_one_costs: Vec<Vec<f64>> = stage_one_rows.iter().map(|&i| costs[i].clone()).collect();
+    let stage_one = linear_assignment(&stage_one_costs, num_columns, unmatched_row_cost, 0.0)?;
+
+    let columns = stage_one.unmatched_columns.clone();
+    let stage_two_costs: Vec<Vec<f64>> = stage_two_rows
+        .iter()
+        .map(|&i| columns.iter().map(|&j| costs[i][j]).collect())
+        .collect();
+    let stage_two = linear_assignment(&stage_two_costs, columns.len(), unmatched_row_cost, 0.0)?;
+
+    let mut pairs: Vec<(usize, usize)> = stage_one
+        .pairs
+        .iter()
+        .map(|&(r, c)| (stage_one_rows[r], c))
+        .chain(
+            stage_two
+                .pairs
+                .iter()
+                .map(|&(r, c)| (stage_two_rows[r], columns[c])),
+        )
+        .collect();
+    pairs.sort_unstable();
+    let mut unmatched_rows: Vec<usize> = stage_one
+        .unmatched_rows
+        .iter()
+        .map(|&r| stage_one_rows[r])
+        .chain(stage_two.unmatched_rows.iter().map(|&r| stage_two_rows[r]))
+        .collect();
+    unmatched_rows.sort_unstable();
+    let mut unmatched_columns: Vec<usize> = stage_two
+        .unmatched_columns
+        .iter()
+        .map(|&c| columns[c])
+        .collect();
+    unmatched_columns.sort_unstable();
+    Ok(Assignment {
+        pairs,
+        unmatched_rows,
+        unmatched_columns,
+    })
 }
 
 /// Constant-velocity tracker for 3D positions in one common frame.
@@ -439,12 +507,34 @@ impl Cartesian3DTracker {
             }
         }
 
-        let assignment = linear_assignment(
-            &costs,
-            n_observations,
-            self.config.gate_squared_mahalanobis,
-            0.0,
-        )?;
+        let assignment = match self.config.recent_track_window_ns {
+            None => linear_assignment(
+                &costs,
+                n_observations,
+                self.config.gate_squared_mahalanobis,
+                0.0,
+            )?,
+            Some(window) => {
+                let recent: Vec<bool> = self
+                    .tracks
+                    .iter()
+                    .map(|track| {
+                        track
+                            .lifecycle
+                            .last_observation_timestamp()
+                            .is_some_and(|last| {
+                                batch.timestamp.as_nanos() - last.as_nanos() <= window
+                            })
+                    })
+                    .collect();
+                cascade_assignment(
+                    &costs,
+                    n_observations,
+                    &recent,
+                    self.config.gate_squared_mahalanobis,
+                )?
+            }
+        };
 
         let mut associations: Vec<ObservationAssociation> = (0..n_observations)
             .map(|observation_index| ObservationAssociation {
@@ -623,6 +713,24 @@ impl Cartesian3DTracker {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cascade_gives_recent_tracks_priority() {
+        // One observation, two tracks on it: row 1 (a coasting track whose
+        // covariance has grown) is cheaper, but row 0 was updated recently.
+        let costs = vec![vec![4.0], vec![1.0]];
+        let plain = linear_assignment(&costs, 1, 16.0, 0.0).unwrap();
+        assert_eq!(plain.pairs, vec![(1, 0)]);
+        let cascade = cascade_assignment(&costs, 1, &[true, false], 16.0).unwrap();
+        assert_eq!(cascade.pairs, vec![(0, 0)]);
+        assert_eq!(cascade.unmatched_rows, vec![1]);
+        assert!(cascade.unmatched_columns.is_empty());
+        // No recent tracks: identical to a single assignment.
+        let all_old = cascade_assignment(&costs, 1, &[false, false], 16.0).unwrap();
+        assert_eq!(all_old.pairs, plain.pairs);
+        assert_eq!(all_old.unmatched_rows, plain.unmatched_rows);
+        assert_eq!(all_old.unmatched_columns, plain.unmatched_columns);
+    }
     use approx::assert_relative_eq;
     use nalgebra::Matrix3;
 
