@@ -28,9 +28,11 @@ independent tracker outputs.
 The core is CPU-only and has no GPU, ROS, Python, OpenCV or inference-engine
 dependency. Numeric work uses `f64`.
 
-> All data shipped in this repository is **synthetic**. Nothing here has been
-> validated against real sensors, and no accuracy, speed or benchmark number is
-> claimed beyond what is explicitly stated in `docs/algorithms.md`.
+> All data shipped in this repository is **synthetic**. The KITTI adapter has
+> been run on the real KITTI tracking calibration, poses and labels with oracle
+> (ground-truth) detections only; no detector-based accuracy, speed or benchmark
+> number is claimed beyond what is explicitly stated in `docs/algorithms.md`
+> and `docs/evaluation.md`.
 
 ## What it is
 
@@ -87,6 +89,8 @@ perception-engine/
   crates/perception-core/    tracking core (types, filter, assignment, lifecycle, trackers)
   crates/perception-engine/  camera-assisted LiDAR SDK (calibration, projection, async, eval, KITTI)
   crates/perception-cli/     CLI, JSONL schemas, scenarios, reports
+  scripts/kitti/             KITTI tracking conversion and multi-sequence evaluation (Python + NumPy)
+  scripts/runpod/            GPU detector runs (OpenPCDet, Ultralytics) on a RunPod pod
   docs/                      architecture, data format, algorithms, camera-lidar, datasets, evaluation
   assets/                    demo assets (hero image)
   .github/workflows/         CI
@@ -132,9 +136,12 @@ expected to improve.
 
 Real KITTI data uses the same `replay`/`evaluate`/`report` path after
 `prepare`; see [`docs/datasets.md`](docs/datasets.md) and
-[`docs/camera-lidar.md`](docs/camera-lidar.md). **No real dataset was downloaded
-in this environment**, so the reported demo numbers come from the synthetic
-fixture only.
+[`docs/camera-lidar.md`](docs/camera-lidar.md). `scripts/kitti/` converts the
+KITTI tracking benchmark and evaluates every sequence; `scripts/runpod/` runs
+GPU detectors (OpenPCDet, Ultralytics) on a RunPod pod to produce the
+detections. The only real-data numbers so far use oracle detections
+([`docs/evaluation.md`](docs/evaluation.md)); the demo numbers come from the
+synthetic fixture.
 
 ## Requirements
 

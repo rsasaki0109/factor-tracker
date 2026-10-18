@@ -35,6 +35,10 @@ jobs:
           cargo run -p perception-core --example three_d_fusion
       - name: Run the CLI demo
         run: cargo run -p perception-cli -- demo --out-dir demo-out
+      - name: KITTI script unit tests
+        run: |
+          python3 -m pip install --quiet numpy
+          python3 -m unittest discover -s scripts/kitti -v
       - name: Run the camera+LiDAR demo
         run: cargo run -p perception-cli -- cam-demo --out-dir cam-demo-out
       - name: Run the camera+LiDAR demo with injected faults

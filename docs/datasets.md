@@ -22,12 +22,12 @@ downloading or redistributing anything. The adapter code in this repository is
 original and covered by this project's MIT OR Apache-2.0 licence; the data and
 any third-party weights keep their own licences.
 
-**No real KITTI data was downloaded or executed in this environment.** Network
-access to the KITTI download requires registration, so the adapter, conversion,
-tests and procedures are implemented and unit-tested against synthetic files in
-the KITTI text format, but the numbers reported by the demos come from the
-synthetic fixture, not from real KITTI. Do not read the synthetic results as
-real-data validation.
+The tracking benchmark calibration, OXTS and label archives (about 10 MB) have
+been run through the conversion and the engine with the labels as oracle
+detections (see `docs/evaluation.md`). That checks frames, projection and
+poses on real files; it says nothing about detector performance. Point clouds
+and images are only needed for real detectors (`scripts/runpod/`). The demo
+numbers still come from the synthetic fixture.
 
 ## Expected layout
 
@@ -55,6 +55,32 @@ lidar_to_reference  = identity                    # velodyne
 The velodyne frame is the reference/tracking frame. Ego poses are camera0-to-
 world and are composed with `camera_to_reference` to map velodyne to world.
 
+## Converting the KITTI tracking benchmark
+
+`scripts/kitti/convert_tracking.py` turns the official tracking archives into
+the layout above, one directory per sequence:
+
+```sh
+python3 scripts/kitti/convert_tracking.py --kitti-root <kitti> --out out/sequences --oracle
+# or, with detector output in <det>/{lidar,camera}/<seq>/<frame>.txt:
+python3 scripts/kitti/convert_tracking.py --kitti-root <kitti> --out out/sequences --detections-root <det>
+scripts/kitti/evaluate_sequences.sh out/sequences out/results
+```
+
+- `calib.txt` is copied unchanged; the adapter reads the tracking format
+  (`R_rect` / `Tr_velo_cam` without a colon, `3x3` `R_rect`).
+- The camera is `image_02`, so `P2` is used. Its translation column (camera 2
+  is about 6 cm from camera 0) is applied as part of `camera_to_reference`.
+- `times.txt` uses the nominal 10 Hz frame period: the tracking benchmark has
+  no per-frame timestamps.
+- `poses.txt` is computed from OXTS with the devkit formula
+  (`convertOxtsToPose`), mapped to rectified camera 0 with
+  `R_rect * Tr_velo_cam * Tr_imu_velo` and anchored at the first frame. With
+  poses, tracking (and the ground truth) is in this `world` frame.
+- `labels_lidar/` holds the tracking labels split per frame; `DontCare`
+  entries are dropped.
+- `image_size.txt` is read from the first `image_02` PNG when present.
+
 ## Obtaining detection results
 
 There is no requirement to train a detector. Two reproducible options:
@@ -64,8 +90,13 @@ There is no requirement to train a detector. Two reproducible options:
    This measures the tracking and association pipeline, not a detector.
 2. **Run an external detector** and convert its output to the KITTI text
    format. Any detector can be used; the engine only needs 3D boxes/positions
-   and 2D boxes. A Python preparation script is acceptable but is not a Rust
-   core dependency.
+   and 2D boxes. `scripts/runpod/` runs OpenPCDet (LiDAR) and an Ultralytics
+   COCO model (camera) on a GPU pod; see `scripts/runpod/README.md`. These
+   scripts are not a Rust core dependency.
+
+3D detection lines may carry the score as a 16th field. 2D detection lines may
+be the short form `type trunc occ alpha x1 y1 x2 y2 score`, a 15-field label
+line (score 1.0) or a full 16-field detection line (score last).
 
 ## Commands
 

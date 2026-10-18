@@ -56,8 +56,12 @@ given recording are reported as unavailable (`null` / `n/a`).
   position),
 - `camera_assoc_accuracy = 1.00` for `camera_associated` and
   `camera_assisted` and not measured (`n/a`) for `lidar_only`,
-- class accuracy equal across modes and below 1.0, because class is a LiDAR
-  observation and the fixture includes unmatched detections.
+- `class_acc = 1.00` for all three modes (class is a LiDAR observation and the
+  fixture's LiDAR classes are correct).
+
+Earlier versions reported a class accuracy below 1.0 here. That was an
+evaluation bug: the track class was compared with the truth *id* instead of the
+truth class.
 
 In the synthetic fixture the LiDAR association is unambiguous, so
 `camera_assisted` does not change the tracking result relative to
@@ -67,8 +71,32 @@ associated (see `crates/perception-engine/tests/camera_lidar.rs`). That
 constructed example is a mechanism check only and is **not** evidence of a
 general real-world accuracy improvement.
 
-No real-data evaluation numbers are reported, because no real dataset could be
-downloaded in this environment. See `docs/datasets.md`.
+### KITTI tracking, oracle detections
+
+All 21 training sequences of the KITTI tracking benchmark (8,008 frames,
+47,262 labelled object-timestamps), converted with
+`scripts/kitti/convert_tracking.py --oracle` and evaluated with
+`scripts/kitti/evaluate_sequences.sh`. The LiDAR and camera "detections" are the
+ground-truth labels themselves, so this is a check of the adapter, the
+calibration/projection and pose handling, and the tracker on real geometry and
+timing. It is **not** a detection or tracking benchmark result.
+
+| mode | coverage | position RMSE (m) | id switches | class accuracy | camera match rate |
+| --- | --- | --- | --- | --- | --- |
+| lidar_only | 1.000 | 0.176 | 98 | 1.000 | n/a |
+| camera_associated | 1.000 | 0.176 | 98 | 1.000 | 0.994 |
+| camera_assisted | 1.000 | 0.176 | 98 | 1.000 | 0.994 |
+
+- Camera match rate: accepted camera associations over camera detections
+  (46,958 / 47,262). Projected label boxes and labelled image boxes agree, which
+  checks `P2`, the rectification and the velodyne/camera transforms.
+- The non-zero position RMSE is filter lag (constant-velocity Kalman filter),
+  since the inputs are exact.
+- The ID switches happen even with perfect detections and are concentrated in
+  a few sequences (0008: 44, 0018: 17, 0020: 14). They are a baseline to
+  investigate, not yet explained.
+
+Detector-based results will be added once `scripts/runpod/` has been run.
 
 ## Reproducing
 

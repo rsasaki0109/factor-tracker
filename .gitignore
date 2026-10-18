@@ -4,3 +4,4 @@
 Cargo.lock.bak
 /cam-demo-out
 /cam-demo-out-injected
+__pycache__/
