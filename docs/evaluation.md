@@ -439,6 +439,48 @@ persistence 3):
   separates people on average but is too noisy frame to frame, and errors
   near people are exactly where it is applied.
 
+### Fixed-lag re-association (FGO)
+
+`--fgo-lag N` (replay, stream, and the ROS 2 node's `fgo_lag`) passes the
+engine's LiDAR frames through `perception_engine::fgo::FixedLagRefiner`: over
+the last N scans it re-decides which detection belongs to which person by the
+trajectories' factor-graph cost (constant-velocity motion and position
+factors; the optimum's cost is the Kalman prediction-error decomposition)
+plus birth, miss and clutter costs, by local search from the engine's own
+association (tail swaps, merges, splits, single detections to clutter).
+Scans older than the window are frozen, so output is final; each frame comes
+out N scans late. Positions are re-estimated causally.
+
+Why: on CODa the base tracker's switches are almost never a lost track
+restarting (fragments, ~0 %); about half are a track moving to another person
+(in half of those both people are detected) and 30 % a person with two tracks
+(`scripts/fgo/switch_types.py`).
+
+Five CODa windows (real detections) and GrandTour ETH-2, `lidar_only`,
+pedestrian prior, 1 m gate; ID switches (coverage):
+
+| setting | CODa all range | CODa within 8 m | ETH-2 |
+| --- | --- | --- | --- |
+| base | 1091 (0.941) | 147 | 22 (0.990) |
+| `--fgo-lag 10` (1 s) | **984** (0.939) | **112** | 22 (0.989) |
+| `--fgo-lag 20` (2 s) | 982 (0.939) | 121 | 22 (0.990) |
+
+- -10 % over the whole range and -24 % within 8 m of the robot at 1 s lag,
+  coverage unchanged; better than the base in every CODa window over the
+  whole range. No effect on ETH-2 (its 22 switches are mostly labels that end
+  in the crowd, see `benchmarks/grandtour_eth2`).
+- The costs were chosen on these same sets (`scripts/fgo`); the differences
+  between nearby settings are a few percent, but a held-out set is still
+  needed.
+- About 3-5 ms per scan in the densest CODa window (~300 tracks over 16 s),
+  against ~2 ms without; real time at 10 Hz.
+- The refiner trades latency for identity: the immediate output is the
+  engine's. For stopping in front of people use the immediate output; for
+  following or counting people, the lagged one.
+- A Python prototype (`scripts/fgo/window.py`) that saw each engine track's
+  later detections reported better lagged numbers (around 940); that was
+  optimistic, the Rust refiner only sees scans up to the current one.
+
 ## Reproducing
 
 ```sh

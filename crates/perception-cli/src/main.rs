@@ -66,6 +66,25 @@ struct TrackerArgs {
     /// suppressed detection has been seen this many times in a row.
     #[arg(long)]
     birth_persistence: Option<u32>,
+    /// Re-decide associations over the last N LiDAR scans by factor-graph
+    /// cost before output (frames come out N scans late); 0 disables.
+    #[arg(long, default_value_t = 0)]
+    fgo_lag: usize,
+    /// With --fgo-lag: cost of starting a track.
+    #[arg(long)]
+    fgo_birth_cost: Option<f64>,
+    /// With --fgo-lag: cost per scan without a detection.
+    #[arg(long)]
+    fgo_miss_cost: Option<f64>,
+    /// With --fgo-lag: cost of a detection that belongs to no track.
+    #[arg(long)]
+    fgo_clutter_cost: Option<f64>,
+    /// With --fgo-lag: detection position standard deviation (m).
+    #[arg(long)]
+    fgo_sigma: Option<f64>,
+    /// With --fgo-lag: tracks closer than this (m) are compared.
+    #[arg(long)]
+    fgo_radius: Option<f64>,
 }
 
 impl TrackerArgs {
@@ -79,6 +98,12 @@ impl TrackerArgs {
             appearance_max_distance: self.appearance_max_distance,
             min_birth_distance_m: self.min_birth_distance_m,
             birth_persistence: self.birth_persistence,
+            fgo_lag: self.fgo_lag,
+            fgo_birth_cost: self.fgo_birth_cost,
+            fgo_miss_cost: self.fgo_miss_cost,
+            fgo_clutter_cost: self.fgo_clutter_cost,
+            fgo_sigma: self.fgo_sigma,
+            fgo_radius: self.fgo_radius,
         }
     }
 }

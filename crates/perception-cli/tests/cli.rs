@@ -257,3 +257,56 @@ fn stream_matches_replay_and_skips_bad_lines() {
     assert!(!streamed.is_empty());
     assert_eq!(streamed, read_lines(&replayed));
 }
+
+#[test]
+fn stream_with_fgo_lag_matches_replay_with_fgo_lag() {
+    let dir = temp_dir("stream-fgo");
+    assert!(cli()
+        .args(["cam-fixture", "--out-dir"])
+        .arg(&dir)
+        .status()
+        .unwrap()
+        .success());
+    let replayed = dir.join("replay.jsonl");
+    assert!(cli()
+        .args([
+            "replay",
+            "--mode",
+            "lidar_only",
+            "--fgo-lag",
+            "5",
+            "--setup"
+        ])
+        .arg(dir.join("setup.json"))
+        .arg("--inputs")
+        .arg(dir.join("inputs.jsonl"))
+        .arg("--output")
+        .arg(&replayed)
+        .arg("--diagnostics")
+        .arg(dir.join("diagnostics.json"))
+        .status()
+        .unwrap()
+        .success());
+    let output = cli()
+        .args([
+            "stream",
+            "--mode",
+            "lidar_only",
+            "--fgo-lag",
+            "5",
+            "--setup",
+        ])
+        .arg(dir.join("setup.json"))
+        .stdin(std::fs::File::open(dir.join("inputs.jsonl")).unwrap())
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let streamed: Vec<Value> = String::from_utf8(output.stdout)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    let expected = read_lines(&replayed);
+    assert_eq!(streamed.len(), expected.len());
+    assert_eq!(streamed, expected);
+}

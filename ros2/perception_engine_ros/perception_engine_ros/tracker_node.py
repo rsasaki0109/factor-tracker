@@ -49,6 +49,9 @@ class TrackerNode(Node):
         mode = p("mode", "lidar_only").value
         engine_args = list(p("engine_args", ["--initial-velocity-variance", "1",
                                              "--accel-spectral-density", "0.5"]).value)
+        fgo_lag = p("fgo_lag", 0).value
+        if fgo_lag > 0:
+            engine_args += ["--fgo-lag", str(fgo_lag)]
         self.class_map = convert.parse_class_map(
             p("class_map", ["person:2", "pedestrian:2", "Pedestrian:2"]).value)
         self.keep_unmapped = p("keep_unmapped_classes", False).value

@@ -27,6 +27,7 @@ pub mod diagnostics;
 pub mod engine;
 pub mod error;
 pub mod eval;
+pub mod fgo;
 pub mod fixture;
 pub mod geometry;
 pub mod inject;
@@ -53,6 +54,7 @@ pub use eval::{
     evaluate_mode, CameraAssociationTruth, EvalConfig, GroundTruthFrame, GroundTruthObject,
     ModeMetrics,
 };
+pub use fgo::{FgoConfig, FgoCounters, FixedLagRefiner};
 pub use geometry::{
     compose, inverse, orthonormalize_rotation, Box3DShape, BoxDimensions, Calibration,
     CameraIntrinsics, PoseTrack, ProjectedBox, ProjectionRejection,

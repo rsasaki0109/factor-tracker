@@ -14,7 +14,9 @@ use perception_engine::io::{
 };
 use perception_engine::kitti::{prepare_sequence, KittiSequencePaths};
 use perception_engine::setup::EngineSetup;
-use perception_engine::{fixture, replay, AllCounters, CameraAssistedLidarEngine};
+use perception_engine::{
+    fixture, replay, AllCounters, CameraAssistedLidarEngine, FgoConfig, FixedLagRefiner,
+};
 
 use crate::jsonl::CliResult;
 use crate::report;
@@ -58,6 +60,37 @@ pub struct TrackerOverrides {
     pub min_birth_distance_m: Option<f64>,
     /// Sightings after which a suppressed birth starts a track anyway.
     pub birth_persistence: Option<u32>,
+    /// Fixed-lag re-association window in LiDAR scans; 0 disables.
+    pub fgo_lag: usize,
+    /// Refiner birth cost.
+    pub fgo_birth_cost: Option<f64>,
+    /// Refiner miss cost.
+    pub fgo_miss_cost: Option<f64>,
+    /// Refiner clutter cost.
+    pub fgo_clutter_cost: Option<f64>,
+    /// Refiner detection position sigma (m).
+    pub fgo_sigma: Option<f64>,
+    /// Refiner comparison radius (m).
+    pub fgo_radius: Option<f64>,
+}
+
+impl TrackerOverrides {
+    /// The refiner, when `fgo_lag` > 0.
+    fn refiner(&self) -> Option<FixedLagRefiner> {
+        if self.fgo_lag == 0 {
+            return None;
+        }
+        let d = FgoConfig::default();
+        Some(FixedLagRefiner::new(FgoConfig {
+            lag_frames: self.fgo_lag,
+            birth_cost: self.fgo_birth_cost.unwrap_or(d.birth_cost),
+            miss_cost: self.fgo_miss_cost.unwrap_or(d.miss_cost),
+            clutter_cost: self.fgo_clutter_cost.unwrap_or(d.clutter_cost),
+            position_sigma_m: self.fgo_sigma.unwrap_or(d.position_sigma_m),
+            radius_m: self.fgo_radius.unwrap_or(d.radius_m),
+            ..d
+        }))
+    }
 }
 
 /// Parses a mode string.
@@ -214,8 +247,17 @@ pub fn replay_setup(
     let injected = inject::apply(&inputs, &options.injection);
     let config = engine_config(options.mode, &calibration, options.tracker);
     let engine = replay::run(calibration, poses, config, &injected)?;
+    let mut lidar_frames = engine.lidar_frames().to_vec();
+    if let Some(mut refiner) = options.tracker.refiner() {
+        let mut refined = Vec::with_capacity(lidar_frames.len());
+        for frame in lidar_frames {
+            refined.extend(refiner.push(frame));
+        }
+        refined.extend(refiner.finish());
+        lidar_frames = refined;
+    }
     Ok(ReplayResult {
-        lidar_frames: engine.lidar_frames().to_vec(),
+        lidar_frames,
         camera_frames: engine.camera_frames().to_vec(),
         counters: engine.counters(),
         diagnostics: engine.log().events().to_vec(),
@@ -270,6 +312,7 @@ pub fn run_stream(
     let mut config = engine_config(parse_mode(mode)?, &calibration, tracker);
     config.reorder.window_ns = reorder_window_ns;
     let mut engine = CameraAssistedLidarEngine::new(config, calibration, poses)?;
+    let mut refiner = tracker.refiner();
     for (number, line) in input.lines().enumerate() {
         let line = line?;
         if line.trim().is_empty() {
@@ -287,19 +330,31 @@ pub fn run_stream(
         };
         engine.ingest(batch, arrival);
         engine.poll(arrival)?;
-        write_stream_frames(&mut engine, &mut output)?;
+        write_stream_frames(&mut engine, refiner.as_mut(), false, &mut output)?;
     }
     engine.flush()?;
-    write_stream_frames(&mut engine, &mut output)?;
+    write_stream_frames(&mut engine, refiner.as_mut(), true, &mut output)?;
     Ok(())
 }
 
 fn write_stream_frames(
     engine: &mut CameraAssistedLidarEngine,
+    refiner: Option<&mut FixedLagRefiner>,
+    finish: bool,
     output: &mut impl Write,
 ) -> CliResult<()> {
-    let mut records: Vec<EngineOutputRecord> = engine
-        .take_lidar_frames()
+    let mut lidar = engine.take_lidar_frames();
+    if let Some(refiner) = refiner {
+        let mut refined: Vec<_> = lidar
+            .into_iter()
+            .flat_map(|frame| refiner.push(frame))
+            .collect();
+        if finish {
+            refined.extend(refiner.finish());
+        }
+        lidar = refined;
+    }
+    let mut records: Vec<EngineOutputRecord> = lidar
         .into_iter()
         .map(EngineOutputRecord::Lidar)
         .chain(

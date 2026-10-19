@@ -40,6 +40,7 @@ The detector is not included: any node publishing `Detection3DArray` works
 | `engine_executable` | `perception-cli` | path to the built CLI |
 | `mode` | `lidar_only` | engine mode |
 | `engine_args` | pedestrian motion prior | extra `perception-cli stream` flags |
+| `fgo_lag` | `0` | re-decide associations over the last N scans (fixed-lag, factor-graph cost); tracks are then published N scans late. 0 = immediate output |
 | `class_map` | `person:2`, `pedestrian:2`, `Pedestrian:2` | detector `class_id` to engine class |
 | `keep_unmapped_classes` | `false` | track detections whose class is not in `class_map` |
 | `min_score` | `0.0` | drop detections below this score |

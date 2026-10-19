@@ -36,7 +36,10 @@ each group.
   ReID-trained model, a learned point-cloud descriptor, more (and
   human-checked) Mid-360 labels, and more windows with a crowded forward zone.
 - Joint probabilistic data association (JPDA) and multiple hypothesis tracking
-  (MHT).
+  (MHT). A fixed-lag re-association by factor-graph cost exists
+  (`--fgo-lag`, -24 % switches within 8 m on CODa at 1 s lag); next: score
+  it on a held-out set (JRDB), use the observations inside a close encounter
+  better, and combine it with an IMM motion model.
 - Learned or adaptive gating thresholds.
 
 ## Implemented since the initial version

@@ -14,18 +14,14 @@ piece after it.
 `grid.sh` score the refiner against the base tracker on five CODa windows
 (real detections) and GrandTour ETH-2.
 
-## Status (not a usable result yet)
+## Status
 
-Base tracker switches are almost never fragments (a lost track restarted):
-on CODa about 48 % are steals (a track moves to another person; in about half
-of them both people are detected) and 30 % duplicates (two tracks on one
-person, the match alternates).
+The usable version is the Rust `FixedLagRefiner` (`--fgo-lag`, see
+`docs/evaluation.md`, "Fixed-lag re-association"). These scripts are the
+prototypes it came from:
 
-| setting | CODa all range | CODa within 8 m | ETH-2 | mean coverage |
-| --- | --- | --- | --- | --- |
-| base tracker | 1091 | 147 | 22 | 0.962 |
-| refine, `--max-gap 30 --birth-cost 8 --miss-cost 0.3 --keep-bonus 2` | 1039 | 132 | 37 | 0.951 |
-
-The refiner helps a little on CODa and hurts ETH-2 and coverage. Open
-problems: the observations inside an encounter are left out of the decision,
-and a duplicate track is never removed.
+- `refine.py` (piece linking across gaps and encounters) barely helps: the
+  base tracker's switches are not fragments.
+- `window.py` (multi-frame re-association, the method the Rust refiner
+  implements) found the cost settings. Its `--lag` mode is optimistic: it
+  keeps each engine track's later detections in view.
