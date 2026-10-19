@@ -30,9 +30,10 @@ each group.
   the robot by 21 % (33 % ahead) over five CODa windows with real
   detections, at no cost with oracle detections. Skipping occluded crops and
   a geometry-only LiDAR shape descriptor did not help (`docs/evaluation.md`).
-  Next: a ReID-trained model, LiDAR intensity/reflectivity cues on sensors
-  that report them (Mid-360 does), and more windows with a crowded forward
-  zone (the forward gain is mostly one window).
+  Mid-360 reflectivity separates people about as well as point-cloud shape
+  and adds little to it (`docs/mid360.md`). Next: a ReID-trained model, a
+  learned point-cloud descriptor, labelled Mid-360 data, and more windows
+  with a crowded forward zone (the forward gain is mostly one window).
 - Joint probabilistic data association (JPDA) and multiple hypothesis tracking
   (MHT).
 - Learned or adaptive gating thresholds.

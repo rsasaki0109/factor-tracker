@@ -4,7 +4,8 @@ JSONL recording.
 
 For every LiDAR batch the 3D detection boxes are projected into the camera
 image with the recording's own calibration (setup.json) and matched to the
-camera detections of the same frame by 2D IoU (one-to-one, greedy). The
+camera detections of the nearest camera batch (within --max-camera-dt) by 2D
+IoU (one-to-one, greedy). The
 matched camera box is cropped from the image and embedded with a frozen
 image backbone (default: DINOv2 ViT-S/14 from timm, no ReID fine-tuning).
 Crops more than --max-occlusion covered by other camera boxes that are closer
@@ -115,6 +116,8 @@ def main() -> None:
     parser.add_argument("--min-height", type=float, default=24.0, help="minimum crop height in pixels")
     parser.add_argument("--max-occlusion", type=float, default=1.0,
                         help="skip crops covered more than this by closer camera boxes (1 keeps all)")
+    parser.add_argument("--max-camera-dt", type=float, default=0.06,
+                        help="seconds; use the nearest camera batch within this of the LiDAR batch")
     parser.add_argument("--batch", type=int, default=64)
     args = parser.parse_args()
 
@@ -122,13 +125,18 @@ def main() -> None:
     projector = Projector(setup)
     embedder = Embedder(args.model, *args.crop_size, args.batch)
     records = [json.loads(line) for line in open(args.seq_dir / "inputs.jsonl")]
-    cameras = {(r["event_time_ns"]): r for r in records if r["type"] == "camera_batch"}
+    cameras = sorted((r["event_time_ns"], r) for r in records if r["type"] == "camera_batch")
+    camera_times = np.array([t for t, _ in cameras], dtype=np.int64)
 
     started, embedded, total, occluded = time.time(), 0, 0, 0
     for record in records:
         if record["type"] != "lidar_batch":
             continue
-        camera = cameras.get(record["event_time_ns"])
+        camera = None
+        if len(camera_times):
+            k = int(np.argmin(np.abs(camera_times - record["event_time_ns"])))
+            if abs(camera_times[k] - record["event_time_ns"]) <= args.max_camera_dt * 1e9:
+                camera = cameras[k][1]
         detections = record["detections"]
         total += len(detections)
         if camera is None or not camera["detections"]:
