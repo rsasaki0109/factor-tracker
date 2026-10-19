@@ -18,7 +18,7 @@ for d in "$data"/coda/* "$data"/eth2; do
   [[ -f ${BASE_CACHE:-/nonexistent}/$name/base.jsonl ]] && { mkdir -p "$o"; cp "${BASE_CACHE}/$name/base.jsonl" "$o/"; }
   [[ -f $o/base.jsonl ]] || $cli replay --setup "$d/setup.json" --inputs "$d/inputs.jsonl" --mode lidar_only \
     --output "$o/base.jsonl" --diagnostics /dev/null $prior > /dev/null
-  ${PY:-python3} "$repo/scripts/fgo/refine.py" "$o/base.jsonl" "$o/refined.jsonl" "$@" > "$o/refine.log"
+  ${PY:-python3} "$repo/scripts/fgo/${REFINER:-refine.py}" "$o/base.jsonl" "$o/refined.jsonl" "$@" > "$o/refine.log"
   zones=("all:" "around8:--zone-range-m 8"); [[ $name == eth2 ]] && zones=("all:")
   for z in "${zones[@]}"; do
     printf "%-16s %-8s %16s %16s\n" "$name" "${z%%:*}" "$(score $o/base.jsonl $d/truth.jsonl $d/setup.json "${z#*:}")" \
