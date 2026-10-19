@@ -483,6 +483,42 @@ pedestrian prior, 1 m gate; ID switches (coverage):
   later detections reported better lagged numbers (around 940); that was
   optimistic, the Rust refiner only sees scans up to the current one.
 
+### Standard metrics against baseline trackers (CODa)
+
+`scripts/eval/mot_metrics.py` scores HOTA, IDF1 and MOTA with a
+distance-based similarity (s = 1 - d / 1 m; the outputs carry positions, not
+boxes), and `scripts/eval/baselines.py` re-implements AB3DMOT- and
+SimpleTrack-style trackers on the engine's own detections, so every tracker
+sees the same inputs (CODa PV-RCNN, CPU, score >= 0.4). All settings were
+chosen on the five development windows above; the held-out windows
+(sequences 3, 4 and 9, 160 scans each, not used before) were scored once
+with those settings.
+
+| tracker (setting chosen on dev) | dev HOTA | dev IDF1 | held-out HOTA | held-out IDF1 | held-out AssA |
+| --- | --- | --- | --- | --- | --- |
+| engine, previous defaults | 0.559 | 0.690 | 0.666 | 0.798 | 0.713 |
+| engine, updated tracks only, gate 5.99 | 0.596 | 0.714 | 0.688 | **0.813** | 0.740 |
+| + FGO (`--fgo-lag 10`) | 0.607 | **0.744** | 0.695 | 0.806 | 0.757 |
+| AB3DMOT-style (0.8 m gate, 8 scans) | **0.614** | 0.741 | **0.705** | 0.806 | **0.771** |
+| AB3DMOT-style + FGO | 0.611 | 0.740 | 0.701 | 0.798 | 0.766 |
+| SimpleTrack-style | 0.578 | 0.649 | 0.666 | 0.743 | 0.718 |
+
+What this supports:
+
+- Reporting coasting predictions cost the engine most of its gap: they
+  count as false positives. With updated-only output and a tighter gate it is
+  close to a tuned AB3DMOT-style tracker, but not ahead of it on HOTA, on
+  either split.
+- FGO cuts ID switches by about 10 % and raises the engine's AssA on the
+  held-out windows (0.740 -> 0.757), but does not move HOTA or IDF1 past the
+  baseline, and slightly lowers AB3DMOT-style's.
+- Every reasonable tracker lands within about 0.01 HOTA of the others on
+  these detections; DetA (about 0.63 dev, 0.65 held-out) limits HOTA as much
+  as association does. Beating the baselines clearly needs better detections,
+  not only a better tracker.
+- The held-out windows are less crowded (32-58 ID switches in total against
+  ~850-1000 on dev), so they separate trackers less.
+
 ## Reproducing
 
 ```sh
