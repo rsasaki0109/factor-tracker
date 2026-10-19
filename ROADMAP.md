@@ -32,7 +32,7 @@ each group.
   a geometry-only LiDAR shape descriptor did not help (`docs/evaluation.md`).
   Mid-360 reflectivity separates people about as well as point-cloud shape
   and adds little to it (`docs/mid360.md`). A first Mid-360 identity
-  benchmark exists (`benchmarks/grandtour_eth2`, 10 s, AI-annotated). Next: a
+  benchmark exists (`benchmarks/grandtour_eth2`, 20 s, AI-annotated). Next: a
   ReID-trained model, a learned point-cloud descriptor, more (and
   human-checked) Mid-360 labels, and more windows with a crowded forward zone.
 - Joint probabilistic data association (JPDA) and multiple hypothesis tracking

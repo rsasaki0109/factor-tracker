@@ -2,8 +2,10 @@
 
 A small identity benchmark for a Livox Mid-360 on a legged robot in a crowd:
 the ANYmal of [GrandTour](https://grand-tour.leggedrobotics.com) mission
-`2024-10-01-11-47-44` (ETH Zurich main hall), LiDAR scans 3700-3800 (10 s,
-10 Hz), pedestrians within 8 m of the robot. 43 people, 1,832 labelled boxes,
+`2024-10-01-11-47-44` (ETH Zurich main hall), LiDAR scans 3700-3900 (20 s,
+10 Hz), pedestrians within 8 m of the robot. 68 people, 2,855 labelled boxes
+(window 1, scans 3700-3800: 43 people, 1,832 boxes; window 2, scans
+3801-3900: 44 people, 1,023 boxes, some of them continuing from window 1),
 up to 30 detections per scan.
 
 **Annotated by Claude (an AI model), not verified by a person.** Read
@@ -34,8 +36,9 @@ the numbers.
    full camera frames with every box and ID (`frameview.py`). Behind the
    robot there is no camera; those tracks were judged from the point cloud
    and the trajectory only.
-3. `apply.py` applies `edits.json`: 9 splits, 14 merges, and segments that
-   could not be decided are excluded rather than guessed. Pieces shorter
+3. `apply.py` applies `edits.json` (one window, 3700-3900, so people crossing
+   scan 3800 keep their id): 24 splits, 17 merges, and segments that could
+   not be decided are excluded rather than guessed. Pieces shorter
    than 5 detections that were not merged into a person are excluded too.
 
 ## What the truth does and does not cover
@@ -45,23 +48,31 @@ the numbers.
   detected people, not detection recall; false positives that were
   excluded are not penalised.
 - ID switches are counted against the person identities above.
-- 8 m radius and 10 s only; the rest of the recording is unlabelled.
+- Excluded segments are mostly people walking in groups, where the
+  detector box moves between people. These are also hard for the tracker,
+  so the scores are optimistic; window 2 has more such exclusions than
+  window 1, which is part of why it scores better.
+- 8 m radius and 20 s only; the rest of the recording is unlabelled.
 
 ## Results
 
 `benchmarks/grandtour_eth2/evaluate.sh` (lidar_only, pedestrian motion prior,
-1 m match gate):
+1 m match gate), ID switches / coverage:
 
-| setting | ID switches | coverage |
-| --- | --- | --- |
-| base | 21 | 0.985 |
-| birth suppression 1.0 m (for good) | 20 | 0.956 |
-| birth suppression 1.5 m, persistence 3 | 19 | 0.975 |
+| setting | all (3700-3900) | window 1 | window 2 |
+| --- | --- | --- | --- |
+| base | 22 / 0.990 | 21 / 0.985 | 1 / 0.998 |
+| birth suppression 1.0 m (for good) | 24 / 0.969 | 20 / 0.956 | 4 / 0.991 |
+| birth suppression 1.5 m, persistence 3 | 25 / 0.982 | 19 / 0.975 | 5 / 0.996 |
 
 With DINOv2 embeddings from the front camera
 (`scripts/reid/embed_detections.py`, not included here to keep the files
-small): appearance weight 10 alone 22 / 0.985, with persistent birth
-suppression 20 / 0.975.
+small): appearance weight 10 alone 27 / 0.990, with persistent birth
+suppression 25 / 0.982.
+
+On window 1 alone birth suppression looked slightly better than base; with
+window 2 added the order reverses. The differences are a few switches on a
+small, AI-labelled sample, so none of these settings is clearly better.
 
 ## Licence
 

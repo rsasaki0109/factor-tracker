@@ -42,3 +42,20 @@ Decisions per pre-label track (v2.json). "ok" = one person throughout.
 - 100: SPLIT at 3797, 3797+ IGNORE (walking man before the gap, a static detection after it)
 - 101: IGNORE (two people walking side by side; red jacket 3773-3777, long-haired woman 3778-3782)
 - 44, 45, 69: no camera, kept as single people (low)
+
+# Second window (frames 3801-3900)
+Same process; edits.json now covers 3700-3900 as one window, so people crossing 3800 keep their id (window-1 labels unchanged).
+More of this window is walking groups, so more segments were excluded than in the first.
+## Tracks
+- ok: 1, 4 (no camera), 5 (box sometimes includes the tall man next to her; position static), 7 (to 3834), 8, 9, 11, 41, 64, 99 (man in white shirt walking towards the robot), 107 (low), 128 (to 3830), 130 (low), 131 (as part of 22, medium), 142, 164, 167, 170 (medium), 171 (no camera, low), 176, 191, 192, 196 (person by the sign), 199, 201 (low), 203 (low)
+- 12: SPLIT at 3842 (walking man before; different legs after a 0.3 m jump across 11 frames) -> 3842+ new person, low
+- 24: SPLIT at 3857 (box in a group by the wall; after the gap a person by the sign) -> 3857+ new person, low
+- 113: standing man 3800-3839; SPLIT at 3854 -> 3854-3893 new person (legs, consistent), 3899+ IGNORE
+- 173: 3822-3856 the box moves over several people at 8 m -> IGNORE; 3857+ woman in patterned vest, standing -> new person
+- 206+214+218: one walker (long hair, backpack) towards the robot -> merge, medium
+- 185+189 merge (189 split at 3861)
+## Excluded
+- 7@3845, 71@3821, 94@3820 (walker with backpack before, someone in jeans after), 116@3813 (woman before, a walker after), 128@3845, 129@3811 (dark walker before, grey coat after), 137@3809 (red-shirt man before, light jacket after), 140@3830 (no camera, 0.8 m jump), 189@3861, 195@3871
+- 153, 165, 169: whole tracks; the box moves between people in a walking group
+- 154 stays excluded: confirmed a pole (the white-shirt man of 99 passes in front of it at 3823-3832)
+- no merge: 7/198, 8/176, 22/176, 24/206, 94/198, 94/199, 100/199, 154/196, 197/203
