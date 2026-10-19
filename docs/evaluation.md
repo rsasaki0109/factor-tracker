@@ -293,10 +293,9 @@ What was tried and what it showed:
   cars (oracle) it costs 15 -> 16 switches and 0.981 -> 0.969 coverage, so it
   is a setting for pedestrian crowds, not a default.
 - **Appearance + birth suppression** is the only combination that moved the
-  front zone (43 -> 26-30 for birth 1.0-1.2 m and weights 5-10). It is
-  sensitive: birth 0.8 m or weight 20 lose the gain, and the 5 m zone gets
-  slightly worse (12 -> 14). This is one 16 s window with 43 front-zone
-  events; it needs more data before it becomes a recommendation.
+  front zone in this window (43 -> 26-30 for birth 1.0-1.2 m and weights
+  5-10); birth 0.8 m or weight 20 lose the gain. See the multi-window check
+  below before using it.
 - **No effect or worse** (code not kept unless noted): applying appearance
   only to ambiguous pairs (no measurable difference, reverted); a LiDAR-only
   identity cue from the point-cloud height in the box (same person |dh|
@@ -308,6 +307,45 @@ What was tried and what it showed:
   switches); merging confirmed
   tracks that stay within 0.3-0.6 m (removes real neighbours, reverted);
   merging pedestrian + scooter boxes of riders (38 merges, no effect).
+
+### Multi-window check (CODa)
+
+The window above was the one the settings were found on, so the same grid was
+run on four more 16 s windows (sequence 20 at frames 4820, 9330 and 12700;
+sequence 13, another day, at 9700) with `scripts/coda/run_window.sh` and
+summed with `scripts/eval/summarize_windows.py`. ID switches summed over the
+five windows (coverage), and in how many windows the setting was better /
+equal / worse than the baseline:
+
+| real detections | 5 m, +-40 deg | 8 m, +-40 deg | 8 m, all around | whole range |
+| --- | --- | --- | --- | --- |
+| baseline | 14 (0.996) | 63 (0.989) | 147 (0.977) | 1091 (0.944) |
+| + appearance, weight 10 | 20 (0.997), 0/3/2 | 61 (0.990), 2/1/2 | 146 (0.978), 1/2/2 | 1088 (0.943), 4/0/1 |
+| + birth suppression 1.0 m | 18 (0.985), 0/4/1 | 63 (0.977), 1/3/1 | 131 (0.968), 3/2/0 | 965 (0.930), 4/0/1 |
+| + both | 15 (0.969), 1/3/1 | **45** (0.970), 2/2/1 | **109** (0.965), 3/2/0 | 960 (0.929), 4/0/1 |
+| + both, birth 1.2 m | 15 (0.961), 1/3/1 | 49 (0.966), 2/2/1 | 116 (0.961), 4/1/0 | **932** (0.921), 4/0/1 |
+
+With oracle detections the same settings do harm: birth suppression raises
+the 8 m all-around switches from 16 to 22 and lowers coverage by about two
+points, because it also blocks real people who walk up next to someone.
+
+What this supports:
+
+- With a noisy detector, appearance + birth suppression (1.0 m, weight 10)
+  reduces switches within 8 m around the robot by 26 %, never worse in any
+  window, and by 12 % over the whole range.
+- The forward-zone gain (-29 %) comes mostly from one window (43 -> 26); in
+  the other four the forward zone has 0-9 switches per window and moves by
+  at most 2 either way.
+- The cost is coverage, worst close in: within 5 m ahead it drops from 0.996
+  to 0.969 (people near the robot are tracked later). For a robot that has to
+  stop for people, that is the number to watch.
+- Appearance alone does nothing measurable; it only helps once birth
+  suppression stops the duplicate tracks it would otherwise have to resolve.
+
+Both stay off by default. They are a setting for crowded scenes with a
+detector that duplicates people, to be checked against the near-zone
+coverage on the target robot.
 
 ## Reproducing
 
