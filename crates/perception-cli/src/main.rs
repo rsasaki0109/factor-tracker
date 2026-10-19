@@ -89,6 +89,19 @@ struct TrackerArgs {
     /// detection (ms); 0 reports only tracks updated in the scan.
     #[arg(long)]
     fgo_coast_ms: Option<i64>,
+    /// Observations (distinct scans) before a track is confirmed.
+    #[arg(long)]
+    confirm_min_observations: Option<u32>,
+    /// A confirmed track without observations for this long (ms) is lost.
+    #[arg(long)]
+    confirmed_to_lost_ms: Option<i64>,
+    /// A lost track without observations for this long (ms) is deleted.
+    #[arg(long)]
+    lost_to_delete_ms: Option<i64>,
+    /// Only report tracks observed within this long (ms) before the scan;
+    /// 0 reports only tracks updated in the scan. Default: report all.
+    #[arg(long)]
+    report_coast_ms: Option<i64>,
 }
 
 impl TrackerArgs {
@@ -109,6 +122,10 @@ impl TrackerArgs {
             fgo_sigma: self.fgo_sigma,
             fgo_radius: self.fgo_radius,
             fgo_coast_ms: self.fgo_coast_ms,
+            confirm_min_observations: self.confirm_min_observations,
+            confirmed_to_lost_ms: self.confirmed_to_lost_ms,
+            lost_to_delete_ms: self.lost_to_delete_ms,
+            report_coast_ms: self.report_coast_ms,
         }
     }
 }

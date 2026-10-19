@@ -74,9 +74,28 @@ pub struct TrackerOverrides {
     pub fgo_radius: Option<f64>,
     /// Refiner coasting report time (ms).
     pub fgo_coast_ms: Option<i64>,
+    /// Observations before confirmation.
+    pub confirm_min_observations: Option<u32>,
+    /// Confirmed-to-lost time (ms).
+    pub confirmed_to_lost_ms: Option<i64>,
+    /// Lost-to-delete time (ms).
+    pub lost_to_delete_ms: Option<i64>,
+    /// Report only tracks observed within this long (ms).
+    pub report_coast_ms: Option<i64>,
 }
 
 impl TrackerOverrides {
+    /// Drops reported tracks not observed within `report_coast_ms`.
+    fn filter_reported(&self, frames: &mut [perception_engine::LidarFrameOutput]) {
+        if let Some(ms) = self.report_coast_ms {
+            for frame in frames {
+                frame
+                    .tracks
+                    .retain(|t| t.age_since_spatial_update_ns <= ms * 1_000_000);
+            }
+        }
+    }
+
     /// The refiner, when `fgo_lag` > 0.
     fn refiner(&self) -> Option<FixedLagRefiner> {
         if self.fgo_lag == 0 {
@@ -236,6 +255,15 @@ fn engine_config(
     if let Some(value) = overrides.birth_persistence {
         config.tracker.birth_persistence = Some(value);
     }
+    if let Some(value) = overrides.confirm_min_observations {
+        config.tracker.common.confirm_min_observation_times = value;
+    }
+    if let Some(value) = overrides.confirmed_to_lost_ms {
+        config.tracker.common.confirmed_to_lost_ns = value * 1_000_000;
+    }
+    if let Some(value) = overrides.lost_to_delete_ms {
+        config.tracker.common.lost_to_delete_ns = value * 1_000_000;
+    }
     config
 }
 
@@ -259,6 +287,7 @@ pub fn replay_setup(
         refined.extend(refiner.finish());
         lidar_frames = refined;
     }
+    options.tracker.filter_reported(&mut lidar_frames);
     Ok(ReplayResult {
         lidar_frames,
         camera_frames: engine.camera_frames().to_vec(),
@@ -316,6 +345,7 @@ pub fn run_stream(
     config.reorder.window_ns = reorder_window_ns;
     let mut engine = CameraAssistedLidarEngine::new(config, calibration, poses)?;
     let mut refiner = tracker.refiner();
+    let report = tracker;
     for (number, line) in input.lines().enumerate() {
         let line = line?;
         if line.trim().is_empty() {
@@ -333,10 +363,10 @@ pub fn run_stream(
         };
         engine.ingest(batch, arrival);
         engine.poll(arrival)?;
-        write_stream_frames(&mut engine, refiner.as_mut(), false, &mut output)?;
+        write_stream_frames(&mut engine, refiner.as_mut(), &report, false, &mut output)?;
     }
     engine.flush()?;
-    write_stream_frames(&mut engine, refiner.as_mut(), true, &mut output)?;
+    write_stream_frames(&mut engine, refiner.as_mut(), &report, true, &mut output)?;
     Ok(())
 }
 
@@ -352,6 +382,7 @@ pub fn run_refine(input: &Path, output: &Path, mut tracker: TrackerOverrides) ->
         refined.extend(refiner.push(frame));
     }
     refined.extend(refiner.finish());
+    tracker.filter_reported(&mut refined);
     write_outputs(output, &refined, &camera)?;
     let c = refiner.counters();
     println!(
@@ -369,6 +400,7 @@ pub fn run_refine(input: &Path, output: &Path, mut tracker: TrackerOverrides) ->
 fn write_stream_frames(
     engine: &mut CameraAssistedLidarEngine,
     refiner: Option<&mut FixedLagRefiner>,
+    report: &TrackerOverrides,
     finish: bool,
     output: &mut impl Write,
 ) -> CliResult<()> {
@@ -383,6 +415,7 @@ fn write_stream_frames(
         }
         lidar = refined;
     }
+    report.filter_reported(&mut lidar);
     let mut records: Vec<EngineOutputRecord> = lidar
         .into_iter()
         .map(EngineOutputRecord::Lidar)
