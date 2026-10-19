@@ -49,7 +49,7 @@ def main() -> None:
     parser.add_argument("--out-dir", type=Path, help="output directory for --image-dir")
     parser.add_argument("--split", default="training")
     parser.add_argument("--out", type=Path)
-    parser.add_argument("--model", default="yolo11x.pt", help="Ultralytics weights (downloaded if missing)")
+    parser.add_argument("--model", default="yolo26x.pt", help="Ultralytics weights (downloaded if missing)")
     parser.add_argument("--score-threshold", type=float, default=0.3)
     parser.add_argument("--batch", type=int, default=16)
     parser.add_argument("--sequences", nargs="*")

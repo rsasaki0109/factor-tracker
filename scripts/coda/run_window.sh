@@ -6,12 +6,12 @@
 # usage: scripts/coda/run_window.sh <sequence> <first> <last> <workdir>
 # env:   PY      python with torch, timm, ultralytics, shapely (default python3)
 #        CKPT    CODa checkpoint (default <workdir>/coda128_allclass_bestoracle.pth)
-#        YOLO    Ultralytics weights (default yolo11x.pt)
+#        YOLO    Ultralytics weights (default yolo26x.pt)
 #        JOBS    parallel LiDAR detector processes (default 4)
 set -euo pipefail
 seq=$1; first=$2; last=$3; work=$4
 repo=$(cd "$(dirname "$0")/../.." && pwd)
-PY=${PY:-python3}; CKPT=${CKPT:-$work/coda128_allclass_bestoracle.pth}; YOLO=${YOLO:-yolo11x.pt}; JOBS=${JOBS:-4}
+PY=${PY:-python3}; CKPT=${CKPT:-$work/coda128_allclass_bestoracle.pth}; YOLO=${YOLO:-yolo26x.pt}; JOBS=${JOBS:-4}
 coda=$work/CODa; name=coda${seq}_${first}; det=$work/det/$name; seqs=$work/seq
 cli=$repo/target/release/perception-cli
 cargo build --release -q -p perception-cli --manifest-path "$repo/Cargo.toml"

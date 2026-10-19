@@ -57,7 +57,7 @@ PCDET_CKPT=/workspace/ckpt/pointpillar_7728.pth bash scripts/runpod/run_all.sh 0
 ```
 
 Variables: `KITTI_ROOT` (default `/workspace/kitti`), `OUT` (default
-`/workspace/pe-out`), `PCDET_CFG`, `YOLO_MODEL` (default `yolo11x.pt`).
+`/workspace/pe-out`), `PCDET_CFG`, `YOLO_MODEL` (default `yolo26x.pt`).
 
 Outputs under `$OUT`:
 

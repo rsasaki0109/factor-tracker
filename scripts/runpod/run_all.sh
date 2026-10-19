@@ -10,7 +10,7 @@ WORK=${WORK:-/workspace}
 KITTI_ROOT=${KITTI_ROOT:-$WORK/kitti}
 OUT=${OUT:-$WORK/pe-out}
 PCDET_CFG=${PCDET_CFG:-cfgs/kitti_models/pointpillar.yaml}
-YOLO_MODEL=${YOLO_MODEL:-yolo11x.pt}
+YOLO_MODEL=${YOLO_MODEL:-yolo26x.pt}
 : "${PCDET_CKPT:?set PCDET_CKPT to an OpenPCDet KITTI checkpoint}"
 
 seq_args=()

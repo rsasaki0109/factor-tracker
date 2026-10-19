@@ -383,6 +383,31 @@ Suggested settings for a robot among pedestrians with a noisy LiDAR detector
 and one forward camera: `--min-birth-distance-m 1.5 --birth-persistence 3
 --appearance-weight 10`. They stay off by default in the library.
 
+#### Camera detector: YOLO11x vs YOLO26x
+
+The numbers above use YOLO11x for the camera boxes that select the ReID
+crops. Re-running the five windows with YOLO26x (Ultralytics 8.4, COCO) gives
+2.6 % more person boxes but the same share of LiDAR pedestrians with an
+embedding (19.9 % vs 20.3 %). By position of the LiDAR pedestrian:
+
+| | out of camera view | in view, < 8 m | in view, 8-15 m | in view, > 15 m |
+| --- | --- | --- | --- | --- |
+| LiDAR pedestrians | 23,353 | 3,691 | 7,516 | 9,657 |
+| with embedding, YOLO11x | 1 % | 72 % | 51 % | 22 % |
+| with embedding, YOLO26x | 1 % | 72 % | 51 % | 23 % |
+
+The camera detector is not the limit: half of the people are outside the one
+forward camera, and in view close range the misses are people occluded by
+others in the crowd. ID switches with YOLO26x embeddings (birth 1.5 m,
+persistence 3, weight 10, real detections): 16 / 50 / 121 / 1002 for the
+four zones, against 11 / 42 / 116 / 983 with YOLO11x; appearance alone gets
+11 / 52 / 137 / 1088 instead of 20 / 61 / 146 / 1088. Swapping the detector
+moves single configurations by up to about 10 switches in the forward zones,
+which is the size of the differences between neighbouring settings: treat
+those as noise and only the consistent effects (birth suppression with
+persistence, appearance on top of it) as findings. The scripts now default
+to YOLO26x.
+
 ## Reproducing
 
 ```sh
