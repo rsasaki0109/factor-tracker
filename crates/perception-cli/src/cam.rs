@@ -82,6 +82,8 @@ pub struct TrackerOverrides {
     pub lost_to_delete_ms: Option<i64>,
     /// Report only tracks observed within this long (ms).
     pub report_coast_ms: Option<i64>,
+    /// Minimum detection score to start a track.
+    pub new_track_score_threshold: Option<f64>,
 }
 
 impl TrackerOverrides {
@@ -260,6 +262,9 @@ fn engine_config(
     }
     if let Some(value) = overrides.confirmed_to_lost_ms {
         config.tracker.common.confirmed_to_lost_ns = value * 1_000_000;
+    }
+    if let Some(value) = overrides.new_track_score_threshold {
+        config.tracker.common.new_track_score_threshold = Some(value);
     }
     if let Some(value) = overrides.lost_to_delete_ms {
         config.tracker.common.lost_to_delete_ns = value * 1_000_000;

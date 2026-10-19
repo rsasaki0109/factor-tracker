@@ -56,6 +56,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 covariance: Matrix3::<f64>::identity() * sigma * sigma,
                 class_label: None,
                 appearance: None,
+                score: None,
             }],
         })?;
         for track in tracks {

@@ -389,6 +389,7 @@ pub fn generate_3d(seed: u64) -> Scenario3d {
                     covariance: Matrix3::<f64>::identity() * (0.15 * 0.15),
                     class_label: Some(perception_core::ClassLabel::new(object.class)),
                     appearance: None,
+                    score: None,
                 });
             }
 
@@ -410,6 +411,7 @@ pub fn generate_3d(seed: u64) -> Scenario3d {
                     covariance,
                     class_label: Some(perception_core::ClassLabel::new(object.class)),
                     appearance: None,
+                    score: None,
                 });
             }
 
@@ -429,6 +431,7 @@ pub fn generate_3d(seed: u64) -> Scenario3d {
                 covariance: Matrix3::<f64>::identity() * 1.0,
                 class_label: None,
                 appearance: None,
+                score: None,
             });
         }
 

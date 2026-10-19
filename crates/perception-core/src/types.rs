@@ -342,6 +342,10 @@ pub struct Position3DObservation {
     /// need to be normalized. Ignored unless
     /// `Cartesian3DTrackerConfig::appearance_weight` is positive.
     pub appearance: Option<Vec<f32>>,
+    /// Optional detector confidence in `[0, 1]`. An observation below
+    /// `TrackerConfig::new_track_score_threshold` updates existing tracks
+    /// but never starts one.
+    pub score: Option<f64>,
 }
 
 /// A batch of 2D observations from one sensor at one timestamp.

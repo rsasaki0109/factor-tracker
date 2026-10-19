@@ -708,9 +708,15 @@ impl Cartesian3DTracker {
         self.birth_candidates
             .retain(|c| now - c.last_seen.as_nanos() <= timeout);
         for &j in &assignment.unmatched_columns {
-            // 3D position observations carry no detection score in this
-            // version, so `new_track_score_threshold` does not apply here.
             let observation = &batch.observations[j];
+            if let (Some(score), Some(threshold)) = (
+                observation.score,
+                self.config.common.new_track_score_threshold,
+            ) {
+                if score < threshold {
+                    continue;
+                }
+            }
             let mut sightings = 1;
             if let Some(min_distance) = self.config.min_birth_distance_m {
                 if confirmed_positions
@@ -953,6 +959,7 @@ mod tests {
             covariance: Matrix3::identity(),
             class_label: None,
             appearance: None,
+            score: None,
         }
     }
 

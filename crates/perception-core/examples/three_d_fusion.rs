@@ -40,6 +40,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 covariance: Matrix3::<f64>::identity() * 0.09,
                 class_label: None,
                 appearance: None,
+                score: None,
             }],
         })?;
 
@@ -61,6 +62,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 covariance: world_covariance,
                 class_label: None,
                 appearance: None,
+                score: None,
             }],
         })?;
 

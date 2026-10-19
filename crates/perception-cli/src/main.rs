@@ -102,6 +102,10 @@ struct TrackerArgs {
     /// 0 reports only tracks updated in the scan. Default: report all.
     #[arg(long)]
     report_coast_ms: Option<i64>,
+    /// Detections below this score only update existing tracks and never
+    /// start one (ByteTrack-style use of low-score detections).
+    #[arg(long)]
+    new_track_score_threshold: Option<f64>,
 }
 
 impl TrackerArgs {
@@ -126,6 +130,7 @@ impl TrackerArgs {
             confirmed_to_lost_ms: self.confirmed_to_lost_ms,
             lost_to_delete_ms: self.lost_to_delete_ms,
             report_coast_ms: self.report_coast_ms,
+            new_track_score_threshold: self.new_track_score_threshold,
         }
     }
 }
