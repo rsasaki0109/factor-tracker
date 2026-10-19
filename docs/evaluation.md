@@ -466,8 +466,10 @@ pedestrian prior, 1 m gate; ID switches (coverage):
 | `--fgo-lag 20` (2 s) | 982 (0.939) | 121 | 22 (0.990) |
 
 - -10 % over the whole range and -24 % within 8 m of the robot at 1 s lag,
-  coverage unchanged; better than the base in every CODa window over the
-  whole range. No effect on ETH-2 (its 22 switches are mostly labels that end
+  coverage unchanged. Per window (all range / within 8 m): 293/22 ->
+  276/25, 8/0 -> 10/0, 118/27 -> 116/22, 370/65 -> 308/43, 302/33 -> 274/22;
+  most of the gain is in the three dense windows, and two counts get slightly
+  worse. No effect on ETH-2 (its 22 switches are mostly labels that end
   in the crowd, see `benchmarks/grandtour_eth2`).
 - The costs were chosen on these same sets (`scripts/fgo`); the differences
   between nearby settings are a few percent, but a held-out set is still
