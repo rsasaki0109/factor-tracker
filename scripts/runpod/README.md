@@ -82,3 +82,24 @@ scripts/kitti/evaluate_sequences.sh out/sequences out/results
 
 The detector output is derived from KITTI data; keep it under the KITTI
 terms and do not commit it to this repository.
+
+# CODa: full two-stage PV-RCNN detections
+
+`scripts/coda/detect_lidar_cpu.py` runs only the first stage of the CODa
+PV-RCNN checkpoint (the second stage needs CUDA operators). On a GPU pod,
+`coda_pvrcnn.sh` runs the whole model (upstream OpenPCDet with the
+coda-models config) over the nine CODa evaluation windows (five used for
+tuning, four held out) and packs the detections:
+
+```sh
+cd /workspace
+git clone -b claude/dreamy-noether-2h4v4t https://github.com/rsasaki0109/perception-engine.git
+bash perception-engine/scripts/runpod/coda_pvrcnn.sh
+# -> /workspace/coda_pvrcnn_dets.tar.gz (a few MB)
+```
+
+- Pod: RunPod PyTorch template (CUDA 11.8 or 12.x), any 16 GB+ GPU, ~20 GB
+  volume. Most of the time goes to fetching the scans from the CODa server
+  (about 1.5 GB for nine windows); inference is a few minutes.
+- Untested on a pod so far: the first run may need small fixes (OpenPCDet
+  version, spconv wheel). The log of a failed run is enough to fix it.

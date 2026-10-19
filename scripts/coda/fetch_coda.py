@@ -84,6 +84,7 @@ def main() -> None:
     parser.add_argument("--first", type=int, required=True)
     parser.add_argument("--last", type=int, required=True)
     parser.add_argument("--workers", type=int, default=16)
+    parser.add_argument("--lidar-only", action="store_true", help="skip the camera images")
     args = parser.parse_args()
 
     seq = args.sequence
@@ -94,10 +95,11 @@ def main() -> None:
     wanted = [name for name in index if name.startswith(prefixes)]
     for frame in range(args.first, args.last + 1):
         wanted += [
-            f"2d_rect/cam0/{seq}/2d_rect_cam0_{seq}_{frame}.png",
             f"3d_comp/os1/{seq}/3d_comp_os1_{seq}_{frame}.bin",
             f"3d_bbox/os1/{seq}/3d_bbox_os1_{seq}_{frame}.json",
         ]
+        if not args.lidar_only:
+            wanted.append(f"2d_rect/cam0/{seq}/2d_rect_cam0_{seq}_{frame}.png")
     jobs = [name for name in wanted if name in index and not (args.coda_root / name).exists()]
     print(f"{len(jobs)} files to fetch ({sum(index[n][1] for n in jobs) / 1e6:.0f} MB)", flush=True)
     for round_ in range(3):
