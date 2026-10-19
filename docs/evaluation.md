@@ -343,9 +343,45 @@ What this supports:
 - Appearance alone does nothing measurable; it only helps once birth
   suppression stops the duplicate tracks it would otherwise have to resolve.
 
-Both stay off by default. They are a setting for crowded scenes with a
-detector that duplicates people, to be checked against the near-zone
-coverage on the target robot.
+#### Persistent births
+
+The coverage loss comes from real people who walk up next to someone: their
+detections are suppressed for as long as they stay close. With
+`birth_persistence` (`--birth-persistence N`) a suppressed detection is kept
+as a candidate; if it reappears within 0.5 m of the previous sighting, at
+most 300 ms later, on N batches in a row, a track is started and the earlier
+sightings count toward confirmation. A second box on a person flickers and
+moves with the person, so it rarely gets there; a neighbour does after N
+frames. Same five windows, appearance weight 10:
+
+| real detections | 5 m, +-40 deg | 8 m, +-40 deg | 8 m, all around | whole range |
+| --- | --- | --- | --- | --- |
+| baseline | 14 (0.996) | 63 (0.989) | 147 (0.977) | 1091 (0.944) |
+| birth 1.0 m, suppressed for good | 15 (0.969) | 45 (0.970) | 109 (0.965) | 960 (0.929) |
+| birth 1.0 m, persistence 3 | 11 (0.986) | 46 (0.983) | 118 (0.973) | 1025 (0.939) |
+| **birth 1.5 m, persistence 3** | **11** (0.986), 1/4/0 | **42** (0.983), 2/2/1 | **116** (0.972), 3/2/0 | 983 (0.936), 4/0/1 |
+| birth 1.5 m, persistence 3, no appearance | 16 (0.986) | 53 (0.984) | 128 (0.972) | 973 (0.936) |
+
+| oracle detections | 5 m, +-40 deg | 8 m, all around | whole range |
+| --- | --- | --- | --- |
+| baseline | 0 (0.998) | 16 (0.994) | 381 (0.986) |
+| birth 1.0 m, suppressed for good | 1 (0.973) | 22 (0.972) | 380 (0.962) |
+| birth 1.5 m, persistence 3 | 0 (0.998) | 16 (0.993) | 359 (0.982) |
+
+On KITTI cars (oracle, all 21 sequences, `lidar_only`): baseline 15 switches
+/ 0.981 coverage, birth 1.0 m suppressed for good 16 / 0.969, birth 1.5 m
+suppressed for good 27 / 0.953, birth 1.5 m with persistence 3 15 / 0.980.
+
+So with persistence the larger birth distance is safe: it no longer costs
+anything with good detections, and with real detections it keeps most of the
+switch reduction (-33 % ahead, -21 % around the robot) while within 5 m ahead
+coverage is 0.986 instead of 0.969. Results are flat for birth 1.5-2.0 m and
+persistence 3-4. Appearance matters here: without it the forward-zone gain
+halves. The forward gain still comes mostly from one window (43 -> 22).
+
+Suggested settings for a robot among pedestrians with a noisy LiDAR detector
+and one forward camera: `--min-birth-distance-m 1.5 --birth-persistence 3
+--appearance-weight 10`. They stay off by default in the library.
 
 ## Reproducing
 

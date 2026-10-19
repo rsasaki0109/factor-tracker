@@ -71,6 +71,17 @@ impl TrackLifecycle {
         }
     }
 
+    /// Counts `count` earlier distinct observation times of the object (for
+    /// example sightings made before the track existed) toward confirmation.
+    pub(crate) fn credit_observation_times(&mut self, count: u32, config: &TrackerConfig) {
+        self.observation_times_count = self.observation_times_count.max(count);
+        if self.state == TrackLifecycleState::Tentative
+            && self.observation_times_count >= config.confirm_min_observation_times
+        {
+            self.state = TrackLifecycleState::Confirmed;
+        }
+    }
+
     /// Advances time to `now`, applying every time-based transition that has
     /// become due. Returns `true` when the track has reached `Deleted`.
     ///

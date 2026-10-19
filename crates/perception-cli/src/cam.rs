@@ -55,6 +55,8 @@ pub struct TrackerOverrides {
     pub appearance_max_distance: Option<f64>,
     /// Minimum distance (m) from a confirmed track for a new track; 0 disables.
     pub min_birth_distance_m: Option<f64>,
+    /// Sightings after which a suppressed birth starts a track anyway.
+    pub birth_persistence: Option<u32>,
 }
 
 /// Parses a mode string.
@@ -196,6 +198,9 @@ pub fn replay_setup(
     }
     if let Some(value) = overrides.min_birth_distance_m {
         config.tracker.min_birth_distance_m = (value > 0.0).then_some(value);
+    }
+    if let Some(value) = overrides.birth_persistence {
+        config.tracker.birth_persistence = Some(value);
     }
     let engine = replay::run(calibration, poses, config, &injected)?;
     Ok(ReplayResult {

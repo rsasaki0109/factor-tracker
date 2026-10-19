@@ -98,6 +98,17 @@ pub struct Cartesian3DTrackerConfig {
     /// report a second box next to a person; such boxes otherwise become
     /// tracks that later take the person's own detections. `None` disables it.
     pub min_birth_distance_m: Option<f64>,
+    /// With `min_birth_distance_m`: a suppressed observation that keeps
+    /// reappearing at the same place is a real neighbour rather than a second
+    /// box on the person. After this many sightings (each within
+    /// `birth_candidate_radius_m` of the previous one and at most
+    /// `birth_candidate_timeout_ns` after it) a track is started. `None`
+    /// suppresses such births for as long as the confirmed track is near.
+    pub birth_persistence: Option<u32>,
+    /// Radius (m) within which a suppressed observation continues a candidate.
+    pub birth_candidate_radius_m: f64,
+    /// A candidate not seen again within this time (ns) is forgotten.
+    pub birth_candidate_timeout_ns: i64,
 }
 
 impl Default for Cartesian3DTrackerConfig {
@@ -114,6 +125,9 @@ impl Default for Cartesian3DTrackerConfig {
             appearance_momentum: 0.9,
             appearance_max_distance: None,
             min_birth_distance_m: None,
+            birth_persistence: None,
+            birth_candidate_radius_m: 0.5,
+            birth_candidate_timeout_ns: 300_000_000,
         }
     }
 }
@@ -160,6 +174,21 @@ impl Cartesian3DTrackerConfig {
         if matches!(self.min_birth_distance_m, Some(d) if !d.is_finite() || d <= 0.0) {
             return Err(InputError::InvalidConfig {
                 reason: "min_birth_distance_m must be finite and > 0",
+            });
+        }
+        if matches!(self.birth_persistence, Some(n) if n < 2) {
+            return Err(InputError::InvalidConfig {
+                reason: "birth_persistence must be >= 2",
+            });
+        }
+        if !self.birth_candidate_radius_m.is_finite() || self.birth_candidate_radius_m <= 0.0 {
+            return Err(InputError::InvalidConfig {
+                reason: "birth_candidate_radius_m must be finite and > 0",
+            });
+        }
+        if self.birth_candidate_timeout_ns <= 0 {
+            return Err(InputError::InvalidConfig {
+                reason: "birth_candidate_timeout_ns must be > 0",
             });
         }
         if matches!(self.recent_track_window_ns, Some(window) if window <= 0) {
@@ -269,6 +298,14 @@ struct Track3D {
     appearance: Option<Vec<f32>>,
 }
 
+/// A suppressed birth that may turn out to be a real neighbour.
+#[derive(Debug, Clone)]
+struct BirthCandidate {
+    position: Vector3<f64>,
+    last_seen: Timestamp,
+    sightings: u32,
+}
+
 /// Unit-norm copy of an embedding; `None` for missing, empty, non-finite or
 /// zero vectors.
 fn normalized(vector: Option<&[f32]>) -> Option<Vec<f32>> {
@@ -355,6 +392,7 @@ pub struct Cartesian3DTracker {
     next_track_id: u64,
     last_time: Option<Timestamp>,
     last_sequence: BTreeMap<SensorId, u64>,
+    birth_candidates: Vec<BirthCandidate>,
 }
 
 impl Cartesian3DTracker {
@@ -367,6 +405,7 @@ impl Cartesian3DTracker {
             next_track_id: 1,
             last_time: None,
             last_sequence: BTreeMap::new(),
+            birth_candidates: Vec::new(),
         })
     }
 
@@ -664,19 +703,34 @@ impl Cartesian3DTracker {
                 .collect(),
             None => Vec::new(),
         };
+        let now = batch.timestamp.as_nanos();
+        let timeout = self.config.birth_candidate_timeout_ns;
+        self.birth_candidates
+            .retain(|c| now - c.last_seen.as_nanos() <= timeout);
         for &j in &assignment.unmatched_columns {
             // 3D position observations carry no detection score in this
             // version, so `new_track_score_threshold` does not apply here.
             let observation = &batch.observations[j];
+            let mut sightings = 1;
             if let Some(min_distance) = self.config.min_birth_distance_m {
                 if confirmed_positions
                     .iter()
                     .any(|p| (p - observation.position).norm() < min_distance)
                 {
-                    continue;
+                    match self.persistent_birth(observation.position, batch.timestamp) {
+                        Some(count) => sightings = count,
+                        None => continue,
+                    }
                 }
             }
             let track_id = self.spawn_track(observation, batch.timestamp, batch.sensor_id)?;
+            if sightings > 1 {
+                // The candidate was seen at `sightings` distinct times already.
+                let track = self.tracks.last_mut().expect("just spawned");
+                track
+                    .lifecycle
+                    .credit_observation_times(sightings, &self.config.common);
+            }
             associations[j] = ObservationAssociation {
                 observation_index: j,
                 track_id: Some(track_id),
@@ -700,6 +754,42 @@ impl Cartesian3DTracker {
             unmatched_track_ids,
         };
         Ok((self.snapshots(), report))
+    }
+
+    /// Records a suppressed birth; returns its number of sightings once it has
+    /// been seen often enough to start a track. A candidate is continued at most once
+    /// per batch, so two boxes in one batch never count as two sightings.
+    fn persistent_birth(&mut self, position: Vector3<f64>, timestamp: Timestamp) -> Option<u32> {
+        let required = self.config.birth_persistence?;
+        let radius = self.config.birth_candidate_radius_m;
+        let nearest = self
+            .birth_candidates
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| c.last_seen != timestamp)
+            .map(|(k, c)| (k, (c.position - position).norm()))
+            .filter(|&(_, d)| d < radius)
+            .min_by(|a, b| a.1.total_cmp(&b.1));
+        match nearest {
+            Some((k, _)) => {
+                let candidate = &mut self.birth_candidates[k];
+                candidate.position = position;
+                candidate.last_seen = timestamp;
+                candidate.sightings += 1;
+                if candidate.sightings >= required {
+                    return Some(self.birth_candidates.swap_remove(k).sightings);
+                }
+                None
+            }
+            None => {
+                self.birth_candidates.push(BirthCandidate {
+                    position,
+                    last_seen: timestamp,
+                    sightings: 1,
+                });
+                None
+            }
+        }
     }
 
     fn apply_observation(
@@ -939,6 +1029,99 @@ mod tests {
                 ObservationOutcome::Spawned
             ]
         );
+    }
+
+    #[test]
+    fn persistent_neighbour_gets_a_track() {
+        let mut config = config();
+        config.min_birth_distance_m = Some(1.0);
+        config.birth_persistence = Some(3);
+        let mut tracker = Cartesian3DTracker::new(config).unwrap();
+        tracker
+            .process_batch(&batch(1, 0, 0, vec![observation(0.0, 0.0, 0.0)]))
+            .unwrap();
+        let mut outcomes = Vec::new();
+        for k in 1..=4u64 {
+            let (_, report) = tracker
+                .process_batch_reported(&batch(
+                    1,
+                    k,
+                    k as i64 * 100_000_000,
+                    vec![observation(0.0, 0.0, 0.0), observation(0.6, 0.0, 0.0)],
+                ))
+                .unwrap();
+            outcomes.push(report.associations[1].outcome);
+        }
+        // Suppressed twice, started on the third sighting, then updated.
+        assert_eq!(
+            outcomes,
+            vec![
+                ObservationOutcome::Unmatched,
+                ObservationOutcome::Unmatched,
+                ObservationOutcome::Spawned,
+                ObservationOutcome::Updated
+            ]
+        );
+    }
+
+    #[test]
+    fn persistent_birth_counts_its_earlier_sightings() {
+        let mut config = config();
+        config.common.confirm_min_observation_times = 3;
+        config.min_birth_distance_m = Some(1.0);
+        config.birth_persistence = Some(3);
+        let mut tracker = Cartesian3DTracker::new(config).unwrap();
+        for k in 0..3u64 {
+            tracker
+                .process_batch(&batch(
+                    1,
+                    k,
+                    k as i64 * 100_000_000,
+                    vec![observation(0.0, 0.0, 0.0)],
+                ))
+                .unwrap();
+        }
+        let mut snapshots = Vec::new();
+        for k in 3..6u64 {
+            snapshots = tracker
+                .process_batch(&batch(
+                    1,
+                    k,
+                    k as i64 * 100_000_000,
+                    vec![observation(0.0, 0.0, 0.0), observation(0.6, 0.0, 0.0)],
+                ))
+                .unwrap();
+        }
+        // The neighbour's track starts on its third sighting already confirmed.
+        assert_eq!(snapshots.len(), 2);
+        assert_eq!(snapshots[1].lifecycle, TrackLifecycleState::Confirmed);
+        assert_eq!(snapshots[1].observation_times_count, 3);
+    }
+
+    #[test]
+    fn intermittent_second_box_stays_suppressed() {
+        let mut config = config();
+        config.min_birth_distance_m = Some(1.0);
+        config.birth_persistence = Some(2);
+        config.birth_candidate_timeout_ns = 150_000_000;
+        let mut tracker = Cartesian3DTracker::new(config).unwrap();
+        tracker
+            .process_batch(&batch(1, 0, 0, vec![observation(0.0, 0.0, 0.0)]))
+            .unwrap();
+        for k in 1..=6u64 {
+            let mut observations = vec![observation(0.0, 0.0, 0.0)];
+            // The second box appears every other batch only (200 ms apart).
+            if k % 2 == 1 {
+                observations.push(observation(0.6, 0.0, 0.0));
+            }
+            let (_, report) = tracker
+                .process_batch_reported(&batch(1, k, k as i64 * 100_000_000, observations))
+                .unwrap();
+            assert!(report
+                .associations
+                .iter()
+                .all(|a| a.outcome != ObservationOutcome::Spawned));
+        }
     }
 
     #[test]

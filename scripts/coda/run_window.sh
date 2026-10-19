@@ -64,6 +64,8 @@ birth10_reid10 --min-birth-distance-m 1.0 --appearance-weight 10
 birth10_reid5 --min-birth-distance-m 1.0 --appearance-weight 5
 birth12_reid10 --min-birth-distance-m 1.2 --appearance-weight 10
 birth08_reid10 --min-birth-distance-m 0.8 --appearance-weight 10
+p3_birth15_reid10 --min-birth-distance-m 1.5 --appearance-weight 10 --birth-persistence 3
+p3_birth15 --min-birth-distance-m 1.5 --birth-persistence 3
 CONFIGS
 done
 echo "results -> $out"

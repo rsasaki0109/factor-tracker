@@ -26,11 +26,11 @@ each group.
 - Appearance-assisted association: the cost term and per-track embeddings are
   implemented, but on CODa (one forward camera) only 13 % of LiDAR detections
   get an embedding and ID switches do not change (`docs/evaluation.md`).
-  Combined with birth suppression it cuts switches within 8 m of the robot
-  by 26 % over five CODa windows with real detections, at some near-range
-  coverage. Next: a ReID-trained model, embeddings that survive occlusion in
-  crowds, and a birth rule that does not block people who really walk up
-  next to someone (it costs switches with oracle detections).
+  Combined with persistent birth suppression it cuts switches within 8 m of
+  the robot by 21 % (33 % ahead) over five CODa windows with real
+  detections, at no cost with oracle detections. Next: a ReID-trained model,
+  embeddings that survive occlusion in crowds, and more windows with a
+  crowded forward zone (the forward gain is mostly one window).
 - Joint probabilistic data association (JPDA) and multiple hypothesis tracking
   (MHT).
 - Learned or adaptive gating thresholds.

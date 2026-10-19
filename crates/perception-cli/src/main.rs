@@ -210,6 +210,10 @@ enum Command {
         /// Do not start tracks closer than this (m) to a confirmed track; 0 disables.
         #[arg(long)]
         min_birth_distance_m: Option<f64>,
+        /// With --min-birth-distance-m: start the track anyway once the
+        /// suppressed detection has been seen this many times in a row.
+        #[arg(long)]
+        birth_persistence: Option<u32>,
     },
     /// Evaluate replay outputs against ground truth.
     Evaluate {
@@ -456,6 +460,7 @@ fn run(cli: Cli) -> CliResult<()> {
             appearance_weight,
             appearance_max_distance,
             min_birth_distance_m,
+            birth_persistence,
         } => {
             let injection = cam::injection_from_flags(
                 lidar_delay_ns,
@@ -474,6 +479,7 @@ fn run(cli: Cli) -> CliResult<()> {
                 appearance_weight,
                 appearance_max_distance,
                 min_birth_distance_m,
+                birth_persistence,
             };
             cam::run_replay(
                 &setup,
