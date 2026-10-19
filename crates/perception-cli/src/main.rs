@@ -85,6 +85,10 @@ struct TrackerArgs {
     /// With --fgo-lag: tracks closer than this (m) are compared.
     #[arg(long)]
     fgo_radius: Option<f64>,
+    /// With --fgo-lag: report a track for this long after its last
+    /// detection (ms); 0 reports only tracks updated in the scan.
+    #[arg(long)]
+    fgo_coast_ms: Option<i64>,
 }
 
 impl TrackerArgs {
@@ -104,6 +108,7 @@ impl TrackerArgs {
             fgo_clutter_cost: self.fgo_clutter_cost,
             fgo_sigma: self.fgo_sigma,
             fgo_radius: self.fgo_radius,
+            fgo_coast_ms: self.fgo_coast_ms,
         }
     }
 }
@@ -276,6 +281,19 @@ enum Command {
         /// in-order LiDAR stream; use ~200 ms when camera batches arrive late.
         #[arg(long, default_value_t = 0)]
         reorder_window_ns: i64,
+        #[command(flatten)]
+        tracker: TrackerArgs,
+    },
+    /// Apply the fixed-lag re-association (--fgo-lag) to an existing output
+    /// file, e.g. one written by another tracker in this format (LiDAR
+    /// frames with observations and associations).
+    Refine {
+        /// Input output-records JSONL.
+        #[arg(long)]
+        input: PathBuf,
+        /// Refined output JSONL.
+        #[arg(long)]
+        output: PathBuf,
         #[command(flatten)]
         tracker: TrackerArgs,
     },
@@ -556,6 +574,11 @@ fn run(cli: Cli) -> CliResult<()> {
                 std::io::BufWriter::new(stdout.lock()),
             )
         }
+        Command::Refine {
+            input,
+            output,
+            tracker,
+        } => cam::run_refine(&input, &output, tracker.overrides()),
         Command::Evaluate {
             output,
             truth,

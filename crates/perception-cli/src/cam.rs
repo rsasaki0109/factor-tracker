@@ -72,6 +72,8 @@ pub struct TrackerOverrides {
     pub fgo_sigma: Option<f64>,
     /// Refiner comparison radius (m).
     pub fgo_radius: Option<f64>,
+    /// Refiner coasting report time (ms).
+    pub fgo_coast_ms: Option<i64>,
 }
 
 impl TrackerOverrides {
@@ -88,6 +90,7 @@ impl TrackerOverrides {
             clutter_cost: self.fgo_clutter_cost.unwrap_or(d.clutter_cost),
             position_sigma_m: self.fgo_sigma.unwrap_or(d.position_sigma_m),
             radius_m: self.fgo_radius.unwrap_or(d.radius_m),
+            coast_ns: self.fgo_coast_ms.map_or(d.coast_ns, |ms| ms * 1_000_000),
             ..d
         }))
     }
@@ -334,6 +337,32 @@ pub fn run_stream(
     }
     engine.flush()?;
     write_stream_frames(&mut engine, refiner.as_mut(), true, &mut output)?;
+    Ok(())
+}
+
+/// Refines an existing output file's LiDAR frames (`--fgo-lag`, default 10).
+pub fn run_refine(input: &Path, output: &Path, mut tracker: TrackerOverrides) -> CliResult<()> {
+    if tracker.fgo_lag == 0 {
+        tracker.fgo_lag = 10;
+    }
+    let mut refiner = tracker.refiner().expect("fgo_lag > 0");
+    let (lidar, camera) = read_output_frames(input)?;
+    let mut refined = Vec::with_capacity(lidar.len());
+    for frame in lidar {
+        refined.extend(refiner.push(frame));
+    }
+    refined.extend(refiner.finish());
+    write_outputs(output, &refined, &camera)?;
+    let c = refiner.counters();
+    println!(
+        "refined {} frames: {} swaps, {} merges, {} splits, {} detections to clutter -> {}",
+        refined.len(),
+        c.swaps,
+        c.merges,
+        c.splits,
+        c.drops,
+        output.display()
+    );
     Ok(())
 }
 
