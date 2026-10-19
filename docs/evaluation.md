@@ -408,6 +408,37 @@ those as noise and only the consistent effects (birth suppression with
 persistence, appearance on top of it) as findings. The scripts now default
 to YOLO26x.
 
+#### Better appearance inputs (negative results)
+
+Offline, with the CODa instance labels: for pairs of observations one to ten
+frames apart, how well does a cue separate the same person from a different
+person within 2 m (ROC AUC of the distance; 0.5 = no information)?
+
+| cue | all pairs | position-ambiguous pairs (0.3-1.0 m apart) |
+| --- | --- | --- |
+| position | 0.767 | 0.722 |
+| camera embedding (DINOv2) | 0.827 | 0.776 |
+| camera, crop < 5 % occluded | 0.853 | |
+| camera, crop 30 % or more occluded | 0.732 | |
+| LiDAR shape (point fraction and spread in 8 height bins, top height) | 0.754 | 0.713 |
+
+Occluded crops are clearly worse, and the shape descriptor (CODa's released
+scans carry no intensity, so geometry only) is about as informative as
+position but available for 73 % of pedestrian detections instead of 20 %.
+Neither helped the tracker on the five windows (real detections, birth 1.5 m,
+persistence 3):
+
+- **Skipping crops occluded more than 30 %** by closer camera boxes
+  (`embed_detections.py --max-occlusion 0.3`, off by default): 16 % fewer
+  embeddings; switches 15 / 47 / 120 / 974 for the four zones against
+  11 / 42 / 116 / 983, i.e. no change beyond noise. The track's moving
+  average already damps single bad crops.
+- **LiDAR shape descriptor as the appearance vector**: weight 3 gives
+  14 / 47 / 129 / 988 (no gain), weight 10 makes everything worse
+  (whole range 1091 -> 1171, with oracle detections 381 -> 436). The cue
+  separates people on average but is too noisy frame to frame, and errors
+  near people are exactly where it is applied.
+
 ## Reproducing
 
 ```sh

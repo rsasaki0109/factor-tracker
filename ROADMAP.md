@@ -28,9 +28,11 @@ each group.
   get an embedding and ID switches do not change (`docs/evaluation.md`).
   Combined with persistent birth suppression it cuts switches within 8 m of
   the robot by 21 % (33 % ahead) over five CODa windows with real
-  detections, at no cost with oracle detections. Next: a ReID-trained model,
-  embeddings that survive occlusion in crowds, and more windows with a
-  crowded forward zone (the forward gain is mostly one window).
+  detections, at no cost with oracle detections. Skipping occluded crops and
+  a geometry-only LiDAR shape descriptor did not help (`docs/evaluation.md`).
+  Next: a ReID-trained model, LiDAR intensity/reflectivity cues on sensors
+  that report them (Mid-360 does), and more windows with a crowded forward
+  zone (the forward gain is mostly one window).
 - Joint probabilistic data association (JPDA) and multiple hypothesis tracking
   (MHT).
 - Learned or adaptive gating thresholds.

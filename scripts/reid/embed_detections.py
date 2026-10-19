@@ -7,6 +7,9 @@ image with the recording's own calibration (setup.json) and matched to the
 camera detections of the same frame by 2D IoU (one-to-one, greedy). The
 matched camera box is cropped from the image and embedded with a frozen
 image backbone (default: DINOv2 ViT-S/14 from timm, no ReID fine-tuning).
+Crops more than --max-occlusion covered by other camera boxes that are closer
+to the camera (lower bottom edge) are not embedded: in crowds they mostly show
+the person in front.
 The embedding is written to the detection's `appearance` field; detections
 without a confident match get none, and the tracker then falls back to
 position alone for them.
@@ -42,6 +45,20 @@ def iou(a, b) -> float:
     inter = ix * iy
     union = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter
     return inter / union if union > 0 else 0.0
+
+
+def occlusion(box, others) -> float:
+    """Fraction of `box` covered by boxes in `others` whose bottom edge is lower
+    in the image (closer to the camera on flat ground)."""
+    x1, y1, x2, y2 = box
+    if x2 - x1 < 1 or y2 - y1 < 1:
+        return 0.0
+    gx, gy = np.meshgrid(np.linspace(x1, x2, 24), np.linspace(y1, y2, 48))
+    covered = np.zeros_like(gx, dtype=bool)
+    for o in others:
+        if o[3] > y2:
+            covered |= (gx >= o[0]) & (gx <= o[2]) & (gy >= o[1]) & (gy <= o[3])
+    return float(covered.mean())
 
 
 class Projector:
@@ -96,6 +113,8 @@ def main() -> None:
     parser.add_argument("--crop-size", type=int, nargs=2, default=(140, 70), metavar=("H", "W"))
     parser.add_argument("--min-iou", type=float, default=0.3)
     parser.add_argument("--min-height", type=float, default=24.0, help="minimum crop height in pixels")
+    parser.add_argument("--max-occlusion", type=float, default=1.0,
+                        help="skip crops covered more than this by closer camera boxes (1 keeps all)")
     parser.add_argument("--batch", type=int, default=64)
     args = parser.parse_args()
 
@@ -105,7 +124,7 @@ def main() -> None:
     records = [json.loads(line) for line in open(args.seq_dir / "inputs.jsonl")]
     cameras = {(r["event_time_ns"]): r for r in records if r["type"] == "camera_batch"}
 
-    started, embedded, total = time.time(), 0, 0
+    started, embedded, total, occluded = time.time(), 0, 0, 0
     for record in records:
         if record["type"] != "lidar_batch":
             continue
@@ -133,6 +152,10 @@ def main() -> None:
             box = camera["detections"][j]["bbox"]
             if box[3] - box[1] < args.min_height:
                 continue
+            others = [c["bbox"] for k, c in enumerate(camera["detections"]) if k != j]
+            if occlusion(box, others) > args.max_occlusion:
+                occluded += 1
+                continue
             used_lidar.add(i)
             used_camera.add(j)
             matches.append((i, box))
@@ -151,7 +174,7 @@ def main() -> None:
     for name in ("setup.json", "truth.jsonl"):
         if (args.seq_dir / name).exists():
             shutil.copyfile(args.seq_dir / name, args.out / name)
-    print(f"embedded {embedded} of {total} LiDAR detections in {time.time() - started:.0f} s -> {args.out}")
+    print(f"embedded {embedded} of {total} LiDAR detections ({occluded} occluded crops skipped) in {time.time() - started:.0f} s -> {args.out}")
 
 
 if __name__ == "__main__":
