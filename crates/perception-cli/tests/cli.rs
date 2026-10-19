@@ -197,3 +197,63 @@ fn track3d_fuses_two_sensors_into_few_tracks() {
         "expected at least one fused multi-sensor track"
     );
 }
+
+#[test]
+fn stream_matches_replay_and_skips_bad_lines() {
+    let dir = temp_dir("stream");
+    assert!(cli()
+        .args(["cam-fixture", "--out-dir"])
+        .arg(&dir)
+        .status()
+        .unwrap()
+        .success());
+    let replayed = dir.join("replay.jsonl");
+    assert!(cli()
+        .args(["replay", "--mode", "camera_assisted", "--setup"])
+        .arg(dir.join("setup.json"))
+        .arg("--inputs")
+        .arg(dir.join("inputs.jsonl"))
+        .arg("--output")
+        .arg(&replayed)
+        .arg("--diagnostics")
+        .arg(dir.join("diagnostics.json"))
+        .status()
+        .unwrap()
+        .success());
+
+    // The replay default reorder window, and one malformed line in the middle.
+    let inputs = std::fs::read_to_string(dir.join("inputs.jsonl")).unwrap();
+    let mut lines: Vec<&str> = inputs.lines().collect();
+    lines.insert(lines.len() / 2, "{\"type\":\"not_a_batch\"}");
+    let mut child = cli()
+        .args([
+            "stream",
+            "--mode",
+            "camera_assisted",
+            "--reorder-window-ns",
+            "200000000",
+            "--setup",
+        ])
+        .arg(dir.join("setup.json"))
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    {
+        use std::io::Write;
+        let mut stdin = child.stdin.take().unwrap();
+        stdin.write_all(lines.join("\n").as_bytes()).unwrap();
+    }
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("skipped"));
+
+    let streamed: Vec<Value> = String::from_utf8(output.stdout)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert!(!streamed.is_empty());
+    assert_eq!(streamed, read_lines(&replayed));
+}

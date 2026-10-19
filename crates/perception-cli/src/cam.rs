@@ -1,5 +1,6 @@
 //! Camera + LiDAR commands: fixture, prepare, replay, evaluate, report, demo.
 
+use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 
 use perception_engine::engine::{EngineConfig, TrackingMode};
@@ -9,11 +10,11 @@ use perception_engine::eval::{
 use perception_engine::geometry::Calibration;
 use perception_engine::inject::{self, InjectionConfig, SensorKind};
 use perception_engine::io::{
-    read_inputs, read_truth, write_jsonl, write_outputs, EngineOutputRecord,
+    read_inputs, read_truth, write_jsonl, write_outputs, EngineInputRecord, EngineOutputRecord,
 };
 use perception_engine::kitti::{prepare_sequence, KittiSequencePaths};
 use perception_engine::setup::EngineSetup;
-use perception_engine::{fixture, replay, AllCounters};
+use perception_engine::{fixture, replay, AllCounters, CameraAssistedLidarEngine};
 
 use crate::jsonl::CliResult;
 use crate::report;
@@ -163,21 +164,18 @@ pub struct ReplayResult {
     pub diagnostics: Vec<perception_engine::DiagnosticEvent>,
 }
 
-/// Runs a replay and returns the results.
-pub fn replay_setup(
-    setup_path: &Path,
-    inputs_path: &Path,
-    options: &ReplayOptions,
-) -> CliResult<ReplayResult> {
-    let (calibration, poses) = load_setup(setup_path)?;
-    let inputs = read_inputs(inputs_path)?;
-    let injected = inject::apply(&inputs, &options.injection);
+/// Builds the engine configuration for a mode, the calibration's tracking
+/// frame and the tracker overrides.
+fn engine_config(
+    mode: TrackingMode,
+    calibration: &Calibration,
+    overrides: TrackerOverrides,
+) -> EngineConfig {
     let mut config = EngineConfig {
-        mode: options.mode,
+        mode,
         ..EngineConfig::default()
     };
     config.tracker.frame_id = calibration.tracking_frame.clone();
-    let overrides = options.tracker;
     if let Some(value) = overrides.initial_velocity_variance {
         config.tracker.initial_velocity_variance = value;
     }
@@ -202,6 +200,19 @@ pub fn replay_setup(
     if let Some(value) = overrides.birth_persistence {
         config.tracker.birth_persistence = Some(value);
     }
+    config
+}
+
+/// Runs a replay and returns the results.
+pub fn replay_setup(
+    setup_path: &Path,
+    inputs_path: &Path,
+    options: &ReplayOptions,
+) -> CliResult<ReplayResult> {
+    let (calibration, poses) = load_setup(setup_path)?;
+    let inputs = read_inputs(inputs_path)?;
+    let injected = inject::apply(&inputs, &options.injection);
+    let config = engine_config(options.mode, &calibration, options.tracker);
     let engine = replay::run(calibration, poses, config, &injected)?;
     Ok(ReplayResult {
         lidar_frames: engine.lidar_frames().to_vec(),
@@ -236,6 +247,77 @@ pub fn run_replay(
         result.camera_frames.len(),
         output.display()
     );
+    Ok(())
+}
+
+/// Runs the engine live: input records (one JSON object per line) are read
+/// from `input`, and every output frame is written to `output` as soon as it
+/// is produced, one JSON object per line. Malformed lines are reported on
+/// stderr and skipped. At end of input the reorder buffer is flushed.
+///
+/// `reorder_window_ns` is how long (in event time) a batch waits for
+/// out-of-order neighbours before it is processed; it is the output latency.
+/// A single in-order LiDAR stream needs none.
+pub fn run_stream(
+    setup: &Path,
+    mode: &str,
+    reorder_window_ns: i64,
+    tracker: TrackerOverrides,
+    input: impl BufRead,
+    mut output: impl Write,
+) -> CliResult<()> {
+    let (calibration, poses) = load_setup(setup)?;
+    let mut config = engine_config(parse_mode(mode)?, &calibration, tracker);
+    config.reorder.window_ns = reorder_window_ns;
+    let mut engine = CameraAssistedLidarEngine::new(config, calibration, poses)?;
+    for (number, line) in input.lines().enumerate() {
+        let line = line?;
+        if line.trim().is_empty() {
+            continue;
+        }
+        let parsed = serde_json::from_str::<EngineInputRecord>(&line)
+            .map_err(|error| error.to_string())
+            .and_then(|record| record.into_batch().map_err(|error| error.to_string()));
+        let (batch, arrival) = match parsed {
+            Ok(value) => value,
+            Err(error) => {
+                eprintln!("stream: line {}: skipped: {error}", number + 1);
+                continue;
+            }
+        };
+        engine.ingest(batch, arrival);
+        engine.poll(arrival)?;
+        write_stream_frames(&mut engine, &mut output)?;
+    }
+    engine.flush()?;
+    write_stream_frames(&mut engine, &mut output)?;
+    Ok(())
+}
+
+fn write_stream_frames(
+    engine: &mut CameraAssistedLidarEngine,
+    output: &mut impl Write,
+) -> CliResult<()> {
+    let mut records: Vec<EngineOutputRecord> = engine
+        .take_lidar_frames()
+        .into_iter()
+        .map(EngineOutputRecord::Lidar)
+        .chain(
+            engine
+                .take_camera_frames()
+                .into_iter()
+                .map(EngineOutputRecord::Camera),
+        )
+        .collect();
+    if records.is_empty() {
+        return Ok(());
+    }
+    records.sort_by_key(EngineOutputRecord::timestamp_ns);
+    for record in &records {
+        serde_json::to_writer(&mut *output, record)?;
+        output.write_all(b"\n")?;
+    }
+    output.flush()?;
     Ok(())
 }
 

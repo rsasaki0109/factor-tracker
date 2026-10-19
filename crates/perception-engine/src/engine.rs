@@ -331,6 +331,19 @@ impl CameraAssistedLidarEngine {
         &self.camera_frames
     }
 
+    /// Removes and returns the LiDAR frame outputs produced so far.
+    ///
+    /// A long-running caller (a live node) takes the outputs after every
+    /// `poll` so they do not accumulate.
+    pub fn take_lidar_frames(&mut self) -> Vec<LidarFrameOutput> {
+        std::mem::take(&mut self.lidar_frames)
+    }
+
+    /// Removes and returns the camera frame outputs produced so far.
+    pub fn take_camera_frames(&mut self) -> Vec<CameraFrameOutput> {
+        std::mem::take(&mut self.camera_frames)
+    }
+
     /// Number of buffered batches.
     pub fn pending_len(&self) -> usize {
         self.buffer.pending_len()

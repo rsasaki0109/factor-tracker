@@ -38,6 +38,51 @@ struct Cli {
     command: Command,
 }
 
+/// Overrides of the 3D tracker defaults.
+#[derive(clap::Args)]
+struct TrackerArgs {
+    /// Override the tracker's initial velocity variance (m^2/s^2).
+    #[arg(long)]
+    initial_velocity_variance: Option<f64>,
+    /// Override the tracker's acceleration spectral density (m^2/s^3).
+    #[arg(long)]
+    accel_spectral_density: Option<f64>,
+    /// Override the tracker's squared-Mahalanobis gate.
+    #[arg(long)]
+    gate_squared_mahalanobis: Option<f64>,
+    /// Override the matching-cascade window in nanoseconds (0 disables it).
+    #[arg(long)]
+    recent_track_window_ns: Option<i64>,
+    /// Weight of the appearance (ReID) cost; 0 disables it.
+    #[arg(long)]
+    appearance_weight: Option<f64>,
+    /// Hard gate on the appearance cosine distance.
+    #[arg(long)]
+    appearance_max_distance: Option<f64>,
+    /// Do not start tracks closer than this (m) to a confirmed track; 0 disables.
+    #[arg(long)]
+    min_birth_distance_m: Option<f64>,
+    /// With --min-birth-distance-m: start the track anyway once the
+    /// suppressed detection has been seen this many times in a row.
+    #[arg(long)]
+    birth_persistence: Option<u32>,
+}
+
+impl TrackerArgs {
+    fn overrides(&self) -> cam::TrackerOverrides {
+        cam::TrackerOverrides {
+            initial_velocity_variance: self.initial_velocity_variance,
+            accel_spectral_density: self.accel_spectral_density,
+            gate_squared_mahalanobis: self.gate_squared_mahalanobis,
+            recent_track_window_ns: self.recent_track_window_ns,
+            appearance_weight: self.appearance_weight,
+            appearance_max_distance: self.appearance_max_distance,
+            min_birth_distance_m: self.min_birth_distance_m,
+            birth_persistence: self.birth_persistence,
+        }
+    }
+}
+
 #[derive(Subcommand)]
 enum Command {
     /// Generate the synthetic 2D scenario (observations + ground truth).
@@ -189,31 +234,25 @@ enum Command {
         /// Pause end event time (ns).
         #[arg(long, default_value_t = 0)]
         pause_end_ns: i64,
-        /// Override the tracker's initial velocity variance (m^2/s^2).
+        #[command(flatten)]
+        tracker: TrackerArgs,
+    },
+    /// Track live: read input records from stdin (one JSON object per line)
+    /// and write each output frame to stdout as soon as it is produced.
+    Stream {
+        /// Setup JSON.
         #[arg(long)]
-        initial_velocity_variance: Option<f64>,
-        /// Override the tracker's acceleration spectral density (m^2/s^3).
-        #[arg(long)]
-        accel_spectral_density: Option<f64>,
-        /// Override the tracker's squared-Mahalanobis gate.
-        #[arg(long)]
-        gate_squared_mahalanobis: Option<f64>,
-        /// Override the matching-cascade window in nanoseconds (0 disables it).
-        #[arg(long)]
-        recent_track_window_ns: Option<i64>,
-        /// Weight of the appearance (ReID) cost; 0 disables it.
-        #[arg(long)]
-        appearance_weight: Option<f64>,
-        /// Hard gate on the appearance cosine distance.
-        #[arg(long)]
-        appearance_max_distance: Option<f64>,
-        /// Do not start tracks closer than this (m) to a confirmed track; 0 disables.
-        #[arg(long)]
-        min_birth_distance_m: Option<f64>,
-        /// With --min-birth-distance-m: start the track anyway once the
-        /// suppressed detection has been seen this many times in a row.
-        #[arg(long)]
-        birth_persistence: Option<u32>,
+        setup: PathBuf,
+        /// Mode: lidar_only | camera_associated | camera_assisted.
+        #[arg(long, default_value = "lidar_only")]
+        mode: String,
+        /// How long (event time, ns) a batch waits for out-of-order inputs
+        /// before it is tracked; this is the added latency. 0 suits a single
+        /// in-order LiDAR stream; use ~200 ms when camera batches arrive late.
+        #[arg(long, default_value_t = 0)]
+        reorder_window_ns: i64,
+        #[command(flatten)]
+        tracker: TrackerArgs,
     },
     /// Evaluate replay outputs against ground truth.
     Evaluate {
@@ -453,14 +492,7 @@ fn run(cli: Cli) -> CliResult<()> {
             pause_sensor,
             pause_start_ns,
             pause_end_ns,
-            initial_velocity_variance,
-            accel_spectral_density,
-            gate_squared_mahalanobis,
-            recent_track_window_ns,
-            appearance_weight,
-            appearance_max_distance,
-            min_birth_distance_m,
-            birth_persistence,
+            tracker,
         } => {
             let injection = cam::injection_from_flags(
                 lidar_delay_ns,
@@ -471,16 +503,7 @@ fn run(cli: Cli) -> CliResult<()> {
                 pause_start_ns,
                 pause_end_ns,
             )?;
-            let tracker = cam::TrackerOverrides {
-                initial_velocity_variance,
-                accel_spectral_density,
-                gate_squared_mahalanobis,
-                recent_track_window_ns,
-                appearance_weight,
-                appearance_max_distance,
-                min_birth_distance_m,
-                birth_persistence,
-            };
+            let tracker = tracker.overrides();
             cam::run_replay(
                 &setup,
                 &inputs,
@@ -489,6 +512,23 @@ fn run(cli: Cli) -> CliResult<()> {
                 &diagnostics,
                 injection,
                 tracker,
+            )
+        }
+        Command::Stream {
+            setup,
+            mode,
+            reorder_window_ns,
+            tracker,
+        } => {
+            let stdin = std::io::stdin();
+            let stdout = std::io::stdout();
+            cam::run_stream(
+                &setup,
+                &mode,
+                reorder_window_ns,
+                tracker.overrides(),
+                stdin.lock(),
+                std::io::BufWriter::new(stdout.lock()),
             )
         }
         Command::Evaluate {
