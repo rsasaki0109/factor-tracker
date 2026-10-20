@@ -103,3 +103,24 @@ bash perception-engine/scripts/runpod/coda_pvrcnn.sh
   (about 1.5 GB for nine windows); inference is a few minutes.
 - Untested on a pod so far: the first run may need small fixes (OpenPCDet
   version, spconv wheel). The log of a failed run is enough to fix it.
+
+## Result (October 2026): the second stage does not help
+
+Run on RunPod (RTX 4090 / A4000, ~50 s per 160-scan window). Pedestrian
+detections within 0.5 m of a CODa label, five development windows:
+
+| | recall at score 0.3 | precision |
+| --- | --- | --- |
+| first stage, CPU port (`detect_lidar_cpu.py`, with NMS) | 0.82 | 0.75 |
+| first stage on GPU (CenterHead RoIs, before final NMS) | 0.81 | 0.44 |
+| full two-stage output | 0.34 | 0.68 |
+
+All 365 checkpoint tensors load, but the RoI head scores real pedestrians low
+(median 0.105, against 0.03 for RoIs that match nobody), so the final score
+threshold removes most of them. Rescoring the first-stage RoIs with the
+second-stage score lowers average precision (0.780 alone, 0.624-0.730
+combined). Raising the RoI limit (`--set`) changes nothing: the RoIs come from
+the CenterHead (up to 500). Whether this is the checkpoint itself or a
+difference between upstream OpenPCDet and the coda-models fork (the
+checkpoint was trained with pcdet 0.5) is not settled; the CPU first stage
+stays the detector of record.
