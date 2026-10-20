@@ -528,7 +528,13 @@ What this supports:
 - With the distance cost the engine is level with the AB3DMOT-style tracker
   on dev (0.615 / 0.614) and slightly ahead on the held-out windows (0.710 /
   0.705, IDF1 0.827 / 0.806). FGO no longer helps: its cost is the Kalman
-  likelihood, the model the distance cost moved away from.
+  likelihood, the model the distance cost moved away from. Re-tuning it on dev
+  (birth 10-40, sigma 0.15-0.25, clutter, miss, radius, lag 10-30) and
+  ablating its moves keeps dev HOTA within 0.612-0.615: swaps cut ID
+  switches (1037 -> 854) but lower IDF1 (0.753 -> 0.746), merges alone give
+  IDF1 0.757 and HOTA 0.615, split and drop change nothing. With positions
+  only, re-deciding over a window adds nothing measurable to the distance
+  association.
 - Assigning every detection the identity of the truth object it matches
   (perfect association on the same detections) scores dev HOTA 0.659, or
   0.697 when unmatched detections are also dropped. Association has about
