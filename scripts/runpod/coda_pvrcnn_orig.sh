@@ -21,7 +21,7 @@ import io, sys, tarfile, urllib.request
 from pathlib import Path
 work, ckpt = Path(sys.argv[1]), Path(sys.argv[2])
 if not (work / "coda-models").exists():
-    data = urllib.request.urlopen("https://codeload.github.com/ut-amrl/coda-models/tar.gz/refs/heads/main").read()
+    data = urllib.request.urlopen("https://codeload.github.com/ut-amrl/coda-models/tar.gz/c9a12d740e55c8794da32d71e8cf30af8cefcff8").read()
     tarfile.open(fileobj=io.BytesIO(data)).extractall(work)
     next(work.glob("coda-models-*")).rename(work / "coda-models")
 if not ckpt.exists():
