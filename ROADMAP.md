@@ -11,6 +11,12 @@ each group.
 - Radar measurement models for range / bearing / Doppler.
 - Sensor-specific observation models beyond Cartesian position and image
   bounding boxes.
+- Detector (next step): detections now limit the CODa scores more than
+  association does. The published CODa PV-RCNN second stage, run in its
+  original environment, tracks slightly worse than the CPU first stage
+  (`scripts/runpod/README.md`), so the next step is training a pedestrian
+  detector on CODa on a rented GPU (estimated $10-30) and re-scoring the
+  trackers on the same dev and held-out windows.
 
 ## Filtering and fusion
 
@@ -37,9 +43,16 @@ each group.
   human-checked) Mid-360 labels, and more windows with a crowded forward zone.
 - Joint probabilistic data association (JPDA) and multiple hypothesis tracking
   (MHT). A fixed-lag re-association by factor-graph cost exists
-  (`--fgo-lag`, -24 % switches within 8 m on CODa at 1 s lag); next: score
-  it on a held-out set (JRDB), use the observations inside a close encounter
-  better, and combine it with an IMM motion model.
+  (`--fgo-lag`, -24 % switches within 8 m on CODa at 1 s lag). Scored on
+  held-out CODa windows (JRDB needs an institutional account): on top of the
+  distance association below it no longer raises HOTA; swaps undo as many
+  right assignments as wrong ones. Next: use the observations inside a close
+  encounter better, and combine it with an IMM motion model.
+- Distance association for people (`--max-association-distance-m 1.0
+  --recent-track-window-ns 0`, the ROS 2 node's default) puts the engine level
+  with an AB3DMOT-style tracker on CODa dev and slightly ahead on held-out
+  windows (HOTA 0.710 / 0.705). Perfect association on the same detections
+  would reach dev HOTA 0.659 (now 0.615); perfect detections 0.836.
 - Learned or adaptive gating thresholds.
 
 ## Implemented since the initial version
