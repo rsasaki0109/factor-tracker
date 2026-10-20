@@ -17,7 +17,7 @@ CFG=cfgs/da-coda-coda_models/waymocenterhead/pvrcnn_allclass128full_finetune_hea
 WINDOWS=${WINDOWS:-"13:9700 20:12700 20:4820 20:8640 20:9330 4:6870 9:8515 3:1800 11:5220"}
 
 WORK=$WORK bash "$repo/scripts/runpod/setup.sh"
-pip install -q shapely pandas
+pip install -q shapely pandas kornia
 [[ -d $WORK/coda-models ]] || git clone -q --depth 1 https://github.com/ut-amrl/coda-models.git "$WORK/coda-models"
 [[ -f $CKPT ]] || curl -sSL -o "$CKPT" \
   https://web.corral.tacc.utexas.edu/texasrobotics/web_CODa/pretrained_models/128channel/coda128_allclass_bestoracle.pth
