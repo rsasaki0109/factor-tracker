@@ -16,7 +16,8 @@ each group.
   original environment, tracks slightly worse than the CPU first stage
   (`scripts/runpod/README.md`), so the next step is training a pedestrian
   detector on CODa on a rented GPU (estimated $10-30) and re-scoring the
-  trackers on the same dev and held-out windows.
+  trackers on the same dev and held-out windows (handoff and evaluation
+  recipe: `docs/detector_training.md`, `scripts/eval/coda_tracker_eval.sh`).
 
 ## Filtering and fusion
 
