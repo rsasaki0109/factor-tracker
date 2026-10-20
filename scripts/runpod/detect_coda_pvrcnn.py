@@ -37,16 +37,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "coda"))
 
 from detect_lidar_cpu import CLASS_NAMES, TO_CODA  # noqa: E402
 
-# pcdet.datasets imports every dataset module, and the Argoverse 2 one needs
-# the av2 package at import time; it is not used here, so stub it.
-try:
-    import av2.utils.io  # noqa: F401
-except ImportError:
-    import types
+# pcdet.datasets imports every dataset module; the Argoverse 2 one needs av2
+# and TorchScript-compiles kornia code at import time, which breaks across
+# versions. It is not used here, so replace it with an empty module.
+import types  # noqa: E402
 
-    for name in ("av2", "av2.utils", "av2.utils.io"):
-        sys.modules[name] = types.ModuleType(name)
-    sys.modules["av2.utils.io"].read_feather = None
+for name in ("pcdet.datasets.argo2", "pcdet.datasets.argo2.argo2_dataset"):
+    sys.modules[name] = types.ModuleType(name)
+sys.modules["pcdet.datasets.argo2.argo2_dataset"].Argo2Dataset = None
 
 from pcdet.config import cfg, cfg_from_yaml_file  # noqa: E402
 from pcdet.datasets import DatasetTemplate  # noqa: E402
