@@ -122,6 +122,19 @@ def main() -> None:
                         "y": float(box[6]),
                     })
                 (out / f"3d_bbox_os1_{seq}_{frame}.json").write_text(json.dumps({"3dbbox": records}))
+                # Intermediate results for diagnosis: first-stage RoIs with their
+                # scores and labels, and the second stage's score and refined box
+                # for each RoI (before the final threshold and NMS).
+                rois = batch["rois"][0].cpu().numpy()
+                keep = rois[:, 3:6].sum(axis=1) > 0
+                second = torch.sigmoid(batch["batch_cls_preds"][0]).reshape(-1).cpu().numpy()
+                refined = batch["batch_box_preds"][0].cpu().numpy()
+                diag = {"roi": np.round(rois[keep], 3).tolist(),
+                        "roi_score": np.round(batch["roi_scores"][0].cpu().numpy()[keep], 4).tolist(),
+                        "roi_label": batch["roi_labels"][0].cpu().numpy()[keep].astype(int).tolist(),
+                        "rcnn_score": np.round(second[keep], 4).tolist(),
+                        "refined": np.round(refined[keep], 3).tolist()}
+                (out / f"rois_{seq}_{frame}.json").write_text(json.dumps(diag))
         print(f"coda{seq}_{first}: {len(frames)} scans in {time.time() - started:.0f} s -> {out}", flush=True)
 
 
