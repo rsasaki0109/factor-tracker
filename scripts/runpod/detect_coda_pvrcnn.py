@@ -46,7 +46,7 @@ for name in ("pcdet.datasets.argo2", "pcdet.datasets.argo2.argo2_dataset"):
     sys.modules[name] = types.ModuleType(name)
 sys.modules["pcdet.datasets.argo2.argo2_dataset"].Argo2Dataset = None
 
-from pcdet.config import cfg, cfg_from_yaml_file  # noqa: E402
+from pcdet.config import cfg, cfg_from_list, cfg_from_yaml_file  # noqa: E402
 from pcdet.datasets import DatasetTemplate  # noqa: E402
 from pcdet.models import build_network, load_data_to_gpu  # noqa: E402
 from pcdet.utils import common_utils  # noqa: E402
@@ -74,12 +74,22 @@ def main() -> None:
     parser.add_argument("--coda-root", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--window", nargs=3, action="append", metavar=("SEQ", "FIRST", "LAST"), required=True)
+    parser.add_argument(
+        "--set", nargs=2, action="append", default=[], metavar=("KEY", "VALUE"),
+        help="config override; the default keeps 500 RoIs per scan for the second stage "
+        "(the published config keeps 100, shared by all 56 classes, which drops people in crowds)",
+    )
     args = parser.parse_args()
 
     cfg_from_yaml_file(args.cfg, cfg)
+    overrides = [("MODEL.ROI_HEAD.NMS_CONFIG.TEST.NMS_PRE_MAXSIZE", "4096"),
+                 ("MODEL.ROI_HEAD.NMS_CONFIG.TEST.NMS_POST_MAXSIZE", "500")] + [tuple(kv) for kv in args.set]
+    cfg_from_list([x for kv in overrides for x in kv], cfg)
+    logger_note = ", ".join(f"{k}={v}" for k, v in overrides)
     if list(cfg.CLASS_NAMES) != CLASS_NAMES:
         raise SystemExit("config class list differs from detect_lidar_cpu.CLASS_NAMES")
     logger = common_utils.create_logger()
+    logger.info(f"config overrides: {logger_note}")
     model = None
     for seq, first, last in args.window:
         first, last = int(first), int(last)
