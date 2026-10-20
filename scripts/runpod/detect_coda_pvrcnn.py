@@ -36,6 +36,18 @@ import torch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "coda"))
 
 from detect_lidar_cpu import CLASS_NAMES, TO_CODA  # noqa: E402
+
+# pcdet.datasets imports every dataset module, and the Argoverse 2 one needs
+# the av2 package at import time; it is not used here, so stub it.
+try:
+    import av2.utils.io  # noqa: F401
+except ImportError:
+    import types
+
+    for name in ("av2", "av2.utils", "av2.utils.io"):
+        sys.modules[name] = types.ModuleType(name)
+    sys.modules["av2.utils.io"].read_feather = None
+
 from pcdet.config import cfg, cfg_from_yaml_file  # noqa: E402
 from pcdet.datasets import DatasetTemplate  # noqa: E402
 from pcdet.models import build_network, load_data_to_gpu  # noqa: E402

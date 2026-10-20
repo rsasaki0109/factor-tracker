@@ -6,7 +6,7 @@
 set -euo pipefail
 
 WORK=${WORK:-/workspace}
-PCDET_REF=${PCDET_REF:-v0.6.0}
+PCDET_REF=${PCDET_REF:-233f849829b6ac19afb8af8837a0246890908755}  # OpenPCDet master (no v0.6 tag exists)
 
 if command -v apt-get > /dev/null; then
   apt-get update -qq
@@ -24,7 +24,8 @@ echo "torch CUDA $cuda -> $spconv"
 pip install -q "numpy<2" "$spconv" ultralytics
 
 if [[ ! -d "$WORK/OpenPCDet" ]]; then
-  git clone --depth 1 --branch "$PCDET_REF" https://github.com/open-mmlab/OpenPCDet.git "$WORK/OpenPCDet"
+  git clone -q https://github.com/open-mmlab/OpenPCDet.git "$WORK/OpenPCDet"
+  git -C "$WORK/OpenPCDet" checkout -q "$PCDET_REF"
 fi
 cd "$WORK/OpenPCDet"
 pip install -q -r requirements.txt
