@@ -50,6 +50,10 @@ struct TrackerArgs {
     /// Override the tracker's squared-Mahalanobis gate.
     #[arg(long)]
     gate_squared_mahalanobis: Option<f64>,
+    /// Associate by horizontal distance (m) to the predicted position, gated at
+    /// this distance, instead of by squared Mahalanobis distance; 0 disables.
+    #[arg(long)]
+    max_association_distance_m: Option<f64>,
     /// Override the matching-cascade window in nanoseconds (0 disables it).
     #[arg(long)]
     recent_track_window_ns: Option<i64>,
@@ -114,6 +118,7 @@ impl TrackerArgs {
             initial_velocity_variance: self.initial_velocity_variance,
             accel_spectral_density: self.accel_spectral_density,
             gate_squared_mahalanobis: self.gate_squared_mahalanobis,
+            max_association_distance_m: self.max_association_distance_m,
             recent_track_window_ns: self.recent_track_window_ns,
             appearance_weight: self.appearance_weight,
             appearance_max_distance: self.appearance_max_distance,

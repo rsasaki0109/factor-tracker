@@ -50,6 +50,8 @@ pub struct TrackerOverrides {
     pub accel_spectral_density: Option<f64>,
     /// Squared-Mahalanobis association gate.
     pub gate_squared_mahalanobis: Option<f64>,
+    /// Horizontal-distance association gate (m); 0 disables.
+    pub max_association_distance_m: Option<f64>,
     /// Matching-cascade window in nanoseconds; `Some(0)` disables the cascade.
     pub recent_track_window_ns: Option<i64>,
     /// Appearance cost weight (0 disables appearance).
@@ -241,6 +243,9 @@ fn engine_config(
     }
     if let Some(value) = overrides.gate_squared_mahalanobis {
         config.tracker.gate_squared_mahalanobis = value;
+    }
+    if let Some(value) = overrides.max_association_distance_m {
+        config.tracker.max_association_distance_m = (value > 0.0).then_some(value);
     }
     if let Some(value) = overrides.recent_track_window_ns {
         config.tracker.recent_track_window_ns = (value > 0).then_some(value);

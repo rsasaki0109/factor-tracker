@@ -23,4 +23,5 @@ done <<'CONFIGS'
 base
 birth_1.0m --min-birth-distance-m 1.0
 birth_1.5m_persistence_3 --min-birth-distance-m 1.5 --birth-persistence 3
+distance_1.0m --max-association-distance-m 1.0 --recent-track-window-ns 0
 CONFIGS

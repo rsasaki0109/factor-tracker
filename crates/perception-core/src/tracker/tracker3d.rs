@@ -65,6 +65,17 @@ pub struct Cartesian3DTrackerConfig {
     /// position (measurement dimension 3). Values above this are never
     /// associated.
     pub gate_squared_mahalanobis: f64,
+    /// When set, association cost is the horizontal (x, y) distance in metres
+    /// between a track's predicted position and an observation, and pairs
+    /// farther apart than this are never associated (AB3DMOT and CenterPoint
+    /// gate people this way). The squared-Mahalanobis gate still applies.
+    ///
+    /// A Mahalanobis cost favours tracks with a large covariance: a track
+    /// that has coasted, or one just started with an uncertain velocity,
+    /// looks closer than a well-observed track at the same distance. A
+    /// distance cost and a fixed gate do not. `None` uses the squared
+    /// Mahalanobis distance as the cost.
+    pub max_association_distance_m: Option<f64>,
     /// Maximum soft cost added when an observation's known class contradicts a
     /// track's [`ClassPrior`]. The added cost is
     /// `class_prior_penalty * prior.confidence`, so a weak prior barely shifts
@@ -119,6 +130,7 @@ impl Default for Cartesian3DTrackerConfig {
             accel_spectral_density: 1.0,
             initial_velocity_variance: 4.0,
             gate_squared_mahalanobis: DEFAULT_GATE_SQUARED_MAHALANOBIS,
+            max_association_distance_m: None,
             class_prior_penalty: 8.0,
             recent_track_window_ns: None,
             appearance_weight: 0.0,
@@ -149,6 +161,11 @@ impl Cartesian3DTrackerConfig {
         if !self.gate_squared_mahalanobis.is_finite() || self.gate_squared_mahalanobis <= 0.0 {
             return Err(InputError::InvalidConfig {
                 reason: "gate_squared_mahalanobis must be finite and > 0",
+            });
+        }
+        if matches!(self.max_association_distance_m, Some(d) if !d.is_finite() || d <= 0.0) {
+            return Err(InputError::InvalidConfig {
+                reason: "max_association_distance_m must be finite and > 0",
             });
         }
         if !self.class_prior_penalty.is_finite() || self.class_prior_penalty < 0.0 {
@@ -606,10 +623,20 @@ impl Cartesian3DTracker {
                 ) {
                     continue;
                 }
-                if let Some(mut cost) = mahalanobis_association_cost(
+                let spatial_cost = mahalanobis_association_cost(
                     squared_distance,
                     self.config.gate_squared_mahalanobis,
-                ) {
+                )
+                .and_then(|cost| match self.config.max_association_distance_m {
+                    None => Some(cost),
+                    Some(max) => {
+                        let predicted = track.filter.state();
+                        let distance = (observation.position.x - predicted[0])
+                            .hypot(observation.position.y - predicted[1]);
+                        (distance <= max).then_some(distance)
+                    }
+                });
+                if let Some(mut cost) = spatial_cost {
                     if let Some(d) = appearance_distance {
                         cost += self.config.appearance_weight * d;
                     }
@@ -627,13 +654,12 @@ impl Cartesian3DTracker {
             }
         }
 
+        let unmatched_cost = self
+            .config
+            .max_association_distance_m
+            .unwrap_or(self.config.gate_squared_mahalanobis);
         let assignment = match self.config.recent_track_window_ns {
-            None => linear_assignment(
-                &costs,
-                n_observations,
-                self.config.gate_squared_mahalanobis,
-                0.0,
-            )?,
+            None => linear_assignment(&costs, n_observations, unmatched_cost, 0.0)?,
             Some(window) => {
                 let recent: Vec<bool> = self
                     .tracks
@@ -647,12 +673,7 @@ impl Cartesian3DTracker {
                             })
                     })
                     .collect();
-                cascade_assignment(
-                    &costs,
-                    n_observations,
-                    &recent,
-                    self.config.gate_squared_mahalanobis,
-                )?
+                cascade_assignment(&costs, n_observations, &recent, unmatched_cost)?
             }
         };
 
@@ -1214,6 +1235,61 @@ mod tests {
             error,
             TrackerError::Input(InputError::FrameMismatch { .. })
         ));
+    }
+
+    /// A well-observed track at x = 0 and a track at x = 1.2 that has coasted
+    /// for 0.4 s; then one observation at x = 0.55. Returns the id of the
+    /// track that takes it (track 1 is the well-observed one).
+    fn neighbour_taking_observation(max_association_distance_m: Option<f64>) -> Option<u64> {
+        let mut config = config();
+        config.max_association_distance_m = max_association_distance_m;
+        let mut tracker = Cartesian3DTracker::new(config).unwrap();
+        let precise = |x: f64| Position3DObservation {
+            covariance: Matrix3::identity() * 0.01,
+            ..observation(x, 0.0, 0.0)
+        };
+        for step in 0..5u64 {
+            let mut observations = vec![precise(0.0)];
+            if step < 2 {
+                observations.push(precise(1.2));
+            }
+            tracker
+                .process_batch(&batch(1, step, step as i64 * 100_000_000, observations))
+                .unwrap();
+        }
+        let (_, report) = tracker
+            .process_batch_reported(&batch(1, 5, 500_000_000, vec![precise(0.55)]))
+            .unwrap();
+        assert_eq!(report.associations[0].outcome, ObservationOutcome::Updated);
+        report.associations[0].track_id.map(|id| id.value())
+    }
+
+    #[test]
+    fn mahalanobis_cost_favours_the_coasting_track() {
+        assert_eq!(neighbour_taking_observation(None), Some(2));
+    }
+
+    #[test]
+    fn distance_cost_gives_the_observation_to_the_nearer_track() {
+        assert_eq!(neighbour_taking_observation(Some(1.0)), Some(1));
+    }
+
+    #[test]
+    fn distance_gate_spawns_a_track_beyond_it() {
+        let mut config = config();
+        config.max_association_distance_m = Some(0.5);
+        let mut tracker = Cartesian3DTracker::new(config).unwrap();
+        tracker
+            .process_batch(&batch(1, 0, 0, vec![observation(0.0, 0.0, 0.0)]))
+            .unwrap();
+        // Within the Mahalanobis gate (unit covariance) but 0.6 m away.
+        let snapshots = tracker
+            .process_batch(&batch(1, 1, 100_000_000, vec![observation(0.6, 0.0, 0.0)]))
+            .unwrap();
+        assert_eq!(snapshots.len(), 2);
+        let mut invalid = super::tests::config();
+        invalid.max_association_distance_m = Some(0.0);
+        assert!(invalid.validate().is_err());
     }
 
     #[test]

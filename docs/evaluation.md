@@ -499,8 +499,10 @@ with those settings.
 | --- | --- | --- | --- | --- | --- |
 | engine, previous defaults | 0.559 | 0.690 | 0.666 | 0.798 | 0.713 |
 | engine, updated tracks only, gate 5.99 | 0.596 | 0.714 | 0.688 | **0.813** | 0.740 |
-| + FGO (`--fgo-lag 10`) | 0.607 | **0.744** | 0.695 | 0.806 | 0.757 |
-| AB3DMOT-style (0.8 m gate, 8 scans) | **0.614** | 0.741 | **0.705** | 0.806 | **0.771** |
+| + FGO (`--fgo-lag 10`) | 0.607 | 0.744 | 0.695 | 0.806 | 0.757 |
+| engine, distance association (1 m, no cascade) | **0.615** | **0.755** | **0.710** | **0.827** | **0.786** |
+| + FGO (`--fgo-lag 10`) | 0.613 | 0.746 | 0.704 | 0.806 | 0.776 |
+| AB3DMOT-style (0.8 m gate, 8 scans) | 0.614 | 0.741 | 0.705 | 0.806 | 0.771 |
 | AB3DMOT-style + FGO | 0.611 | 0.740 | 0.701 | 0.798 | 0.766 |
 | SimpleTrack-style | 0.578 | 0.649 | 0.666 | 0.743 | 0.718 |
 
@@ -510,6 +512,28 @@ What this supports:
   count as false positives. With updated-only output and a tighter gate it is
   close to a tuned AB3DMOT-style tracker, but not ahead of it on HOTA, on
   either split.
+- The rest of the gap was the association cost. A squared Mahalanobis cost
+  favours tracks with a large covariance (one that has coasted, or one just
+  started with an uncertain velocity), so they take detections from
+  well-observed neighbours; a larger Mahalanobis gate makes it worse (dev HOTA
+  0.598 at 9.21, 0.586 at 20). With `--max-association-distance-m 1.0` the
+  cost is the horizontal distance to the predicted position with a fixed 1 m
+  gate. The matching cascade, which existed to work around the same bias,
+  then only gets in the way (`--recent-track-window-ns 0`; with it, held-out
+  HOTA is 0.679). Distance 0.8 m and 1.0 m, and the motion-noise settings,
+  differ by at most 0.003 on dev; 1.0 m was chosen there, and the held-out
+  windows were scored with it afterwards. The ROS 2 node uses this setting
+  by default; the engine default stays Mahalanobis, since a fixed metric gate
+  suits people but not fast vehicles.
+- With the distance cost the engine is level with the AB3DMOT-style tracker
+  on dev (0.615 / 0.614) and slightly ahead on the held-out windows (0.710 /
+  0.705, IDF1 0.827 / 0.806). FGO no longer helps: its cost is the Kalman
+  likelihood, the model the distance cost moved away from.
+- Assigning every detection the identity of the truth object it matches
+  (perfect association on the same detections) scores dev HOTA 0.659, or
+  0.697 when unmatched detections are also dropped. Association has about
+  0.045 HOTA left on these detections; most remaining ID switches are
+  neighbours exchanging tracks in crowds.
 - FGO cuts ID switches by about 10 % and raises the engine's AssA on the
   held-out windows (0.740 -> 0.757), but does not move HOTA or IDF1 past the
   baseline, and slightly lowers AB3DMOT-style's.

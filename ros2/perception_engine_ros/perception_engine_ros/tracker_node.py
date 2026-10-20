@@ -47,8 +47,11 @@ class TrackerNode(Node):
         self.tracking_frame = p("tracking_frame", "odom").value
         executable = p("engine_executable", "perception-cli").value
         mode = p("mode", "lidar_only").value
+        # Pedestrian motion prior and association by distance (docs/evaluation.md).
         engine_args = list(p("engine_args", ["--initial-velocity-variance", "1",
-                                             "--accel-spectral-density", "0.5"]).value)
+                                             "--accel-spectral-density", "0.5",
+                                             "--max-association-distance-m", "1.0",
+                                             "--recent-track-window-ns", "0"]).value)
         fgo_lag = p("fgo_lag", 0).value
         if fgo_lag > 0:
             engine_args += ["--fgo-lag", str(fgo_lag)]

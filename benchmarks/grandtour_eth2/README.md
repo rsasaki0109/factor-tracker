@@ -64,6 +64,7 @@ the numbers.
 | base | 22 / 0.990 | 21 / 0.985 | 1 / 0.998 |
 | birth suppression 1.0 m (for good) | 24 / 0.969 | 20 / 0.956 | 4 / 0.991 |
 | birth suppression 1.5 m, persistence 3 | 25 / 0.982 | 19 / 0.975 | 5 / 0.996 |
+| distance association 1 m, no cascade | 21 / 0.987 | 19 / 0.982 | 2 / 0.997 |
 
 With DINOv2 embeddings from the front camera
 (`scripts/reid/embed_detections.py`, not included here to keep the files
@@ -73,6 +74,9 @@ suppression 25 / 0.982.
 On window 1 alone birth suppression looked slightly better than base; with
 window 2 added the order reverses. The differences are a few switches on a
 small, AI-labelled sample, so none of these settings is clearly better.
+Distance association (`--max-association-distance-m 1.0
+--recent-track-window-ns 0`, the setting chosen on CODa) also raises HOTA
+here from 0.575 to 0.583 (`scripts/eval/mot_metrics.py`).
 
 ## Licence
 
