@@ -87,40 +87,60 @@ terms and do not commit it to this repository.
 
 `scripts/coda/detect_lidar_cpu.py` runs only the first stage of the CODa
 PV-RCNN checkpoint (the second stage needs CUDA operators). On a GPU pod,
-`coda_pvrcnn.sh` runs the whole model (upstream OpenPCDet with the
-coda-models config) over the nine CODa evaluation windows (five used for
-tuning, four held out) and packs the detections:
+`coda_pvrcnn_orig.sh` runs the whole model (the coda-models fork of OpenPCDet
+that the checkpoint was trained with) over the CODa windows in `WINDOWS`
+(`seq:first`, 160 scans each; default the two development windows below) and
+packs the detections:
 
 ```sh
 cd /workspace
 git clone -b claude/dreamy-noether-2h4v4t https://github.com/rsasaki0109/perception-engine.git
-bash perception-engine/scripts/runpod/coda_pvrcnn.sh
+bash perception-engine/scripts/runpod/coda_pvrcnn_orig.sh
 # -> /workspace/coda_pvrcnn_dets.tar.gz (a few MB)
 ```
 
-- Pod: RunPod PyTorch template (CUDA 11.8 or 12.x), any 16 GB+ GPU, ~20 GB
-  volume. Most of the time goes to fetching the scans from the CODa server
-  (about 1.5 GB for nine windows); inference is a few minutes.
-- Untested on a pod so far: the first run may need small fixes (OpenPCDet
-  version, spconv wheel). The log of a failed run is enough to fix it.
+- Pod: image `pytorch/pytorch:1.10.0-cuda11.3-cudnn8-devel`, an Ampere GPU
+  (the script builds for sm_86: A4000-A6000, RTX 3090, A40), ~20 GB volume.
+  `pod_start.sh` runs it unattended (`RUN_SCRIPT=coda_pvrcnn_orig.sh`) and
+  serves only the log and the tarball, read-only, on port 8000.
+- Most of the time goes to building the CUDA operators and fetching the scans
+  from the CODa server (about 170 MB per window); inference is about 70 s per
+  window on an A40.
 
-## Result (October 2026): the second stage does not help
+## Result (October 2026): the second stage does not help tracking
 
-Run on RunPod (RTX 4090 / A4000, ~50 s per 160-scan window). Pedestrian
-detections within 0.5 m of a CODa label, five development windows:
+First run, upstream OpenPCDet (`coda_pvrcnn.sh`): all 365 checkpoint tensors
+load, but the RoI head scored real pedestrians low (median 0.105) and the
+two-stage output kept only 0.34 recall at score 0.3. That was the port, not
+the checkpoint: in the original environment (`coda_pvrcnn_orig.sh`: the
+coda-models fork at c9a12d74, PyTorch 1.10 / CUDA 11.3, spconv-cu113) the
+same checkpoint scores matching pedestrian RoIs at a median 0.75 (0.12 for
+RoIs that match nobody). Use `coda_pvrcnn_orig.sh`; `coda_pvrcnn.sh` is kept
+only as the record of that difference.
 
-| | recall at score 0.3 | precision |
+Development windows coda20_8640 and coda13_9700 (320 scans), final
+pedestrian detections within 0.5 m of a CODa label:
+
+| | score | recall | precision | mean BEV error |
+| --- | --- | --- | --- | --- |
+| first stage, CPU port (`detect_lidar_cpu.py`) | 0.4 | 0.773 | 0.784 | 0.130 m |
+| full two-stage, original environment | 0.4 | 0.752 | 0.779 | 0.123 m |
+| first stage, CPU port | 0.5 | 0.762 | 0.846 | 0.128 m |
+| full two-stage, original environment | 0.5 | 0.718 | 0.806 | 0.120 m |
+
+Tracking on the same two windows, same conversion and flags
+(`docs/evaluation.md`, HOTA / IDF1):
+
+| detections | ours + FGO | AB3DMOT-style |
 | --- | --- | --- |
-| first stage, CPU port (`detect_lidar_cpu.py`, with NMS) | 0.82 | 0.75 |
-| first stage on GPU (CenterHead RoIs, before final NMS) | 0.81 | 0.44 |
-| full two-stage output | 0.34 | 0.68 |
+| first stage, CPU, score >= 0.4 | 0.552 / 0.658 | 0.566 / 0.665 |
+| two-stage, score >= 0.3 | 0.530 / 0.645 | 0.551 / 0.663 |
+| two-stage, score >= 0.4 | 0.530 / 0.647 | 0.549 / 0.656 |
+| two-stage, score >= 0.5 | 0.526 / 0.646 | 0.544 / 0.651 |
 
-All 365 checkpoint tensors load, but the RoI head scores real pedestrians low
-(median 0.105, against 0.03 for RoIs that match nobody), so the final score
-threshold removes most of them. Rescoring the first-stage RoIs with the
-second-stage score lowers average precision (0.780 alone, 0.624-0.730
-combined). Raising the RoI limit (`--set`) changes nothing: the RoIs come from
-the CenterHead (up to 500). Whether this is the checkpoint itself or a
-difference between upstream OpenPCDet and the coda-models fork (the
-checkpoint was trained with pcdet 0.5) is not settled; the CPU first stage
-stays the detector of record.
+The refinement moves boxes about 1 cm closer but loses recall, so tracking is
+slightly worse at every threshold. Rescoring the first-stage RoIs with the
+second-stage score raises RoI-level average precision only a little (0.780
+alone, 0.799 with roi * sqrt(rcnn)). The CPU first stage stays the detector of
+record; a better detector would have to be trained, not taken from this
+checkpoint.

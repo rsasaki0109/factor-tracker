@@ -208,7 +208,8 @@ scan on one CPU core.
 
 Caveats: CODa splits frames randomly, and 116 of the 161 frames in this window
 are in the CODa *training* split, so detector numbers are optimistic. The
-first stage alone is weaker than the published two-stage model.
+first stage alone tracks slightly better than the full two-stage model on
+the development windows (scripts/runpod/README.md).
 
 Detector (pedestrians, score >= 0.4, one-to-one matching within 0.5 m in the
 bird's-eye view, objects within 50 m, all 161 frames): precision 0.84, recall
