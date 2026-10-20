@@ -18,6 +18,11 @@ WINDOWS=${WINDOWS:-"13:9700 20:12700 20:4820 20:8640 20:9330 4:6870 9:8515 3:180
 
 WORK=$WORK bash "$repo/scripts/runpod/setup.sh"
 pip install -q shapely pandas kornia
+# Upstream VoxelSetAbstraction calls .contiguous() on the raw-point features
+# even when the model uses x, y, z only (features None, as in the CODa
+# config); coda-models passes None through. Same fix here.
+sed -i 's/features=xyz_features.contiguous(),/features=xyz_features.contiguous() if xyz_features is not None else None,/' \
+  "$WORK/OpenPCDet/pcdet/models/backbones_3d/pfe/voxel_set_abstraction.py"
 [[ -d $WORK/coda-models ]] || git clone -q --depth 1 https://github.com/ut-amrl/coda-models.git "$WORK/coda-models"
 [[ -f $CKPT ]] || curl -sSL -o "$CKPT" \
   https://web.corral.tacc.utexas.edu/texasrobotics/web_CODa/pretrained_models/128channel/coda128_allclass_bestoracle.pth
