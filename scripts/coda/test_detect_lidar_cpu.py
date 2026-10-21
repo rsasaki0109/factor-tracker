@@ -61,5 +61,22 @@ class SparseConvTest(unittest.TestCase):
             self.assertEqual(int(reach.sum()), len(y.coords))
 
 
+@unittest.skipIf(torch is None, "PyTorch not installed")
+class ModelConfigTest(unittest.TestCase):
+    def test_checkpoint_is_recognised_by_its_class_count(self):
+        for names, point_range in ((det.CLASS_NAMES, det.POINT_RANGE), (det.PED_CLASS_NAMES, det.PED_POINT_RANGE)):
+            sd = {"dense_head.heads_list.0.hm.1.weight": torch.zeros(len(names), 64, 3, 3)}
+            got_names, got_range = det.model_config(sd)
+            self.assertEqual(got_names, names)
+            self.assertTrue((got_range == point_range).all())
+        with self.assertRaises(ValueError):
+            det.model_config({"dense_head.heads_list.0.hm.1.weight": torch.zeros(3, 64, 3, 3)})
+
+    def test_pedestrian_grid_compresses_to_the_same_bev_channels(self):
+        # 41 x 1024 x 1024 voxels -> conv_out depth 2 -> 2 * 128 = 256 BEV channels, as for the published model.
+        x = det.voxelize(torch.tensor([[50.0, -50.0, 0.0, 0.0]]).numpy(), det.PED_POINT_RANGE)
+        self.assertEqual(x.shape, (41, 1024, 1024))
+
+
 if __name__ == "__main__":
     unittest.main()

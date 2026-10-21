@@ -4,7 +4,11 @@ r"""CPU inference of the first stage of the CODa PV-RCNN model.
 Runs the published CODa checkpoint `coda128_allclass_bestoracle.pth`
 (OpenPCDet PV-RCNN, CenterHead, 56 classes; config
 `tools/cfgs/da-coda-coda_models/waymocenterhead/pvrcnn_allclass128full_*.yaml`
-in https://github.com/ut-amrl/coda-models) without CUDA, spconv or OpenPCDet:
+in https://github.com/ut-amrl/coda-models) without CUDA, spconv or OpenPCDet.
+It also runs the pedestrian-only CenterPoint trained by
+`scripts/runpod/train_coda_ped.py` (`scripts/runpod/cfgs/coda_ped_centerpoint.yaml`:
+same network, one class, +-51.2 m instead of +-75.2 m, about twice as fast);
+the model is recognised from the checkpoint's number of classes.
 
     points -> mean voxel features -> VoxelBackBone8x (sparse 3D conv)
            -> height compression -> BaseBEVBackbone -> CenterHead -> boxes
@@ -15,7 +19,8 @@ The second stage (keypoint set abstraction and RoI refinement) needs custom
 CUDA operators and is NOT run: boxes and scores are the CenterHead proposals,
 and non-maximum suppression is a rotated bird's-eye-view IoU NMS done with
 Shapely at the config's final threshold (0.1). Expect lower precision than the
-published two-stage numbers. About 20-30 s per 128-beam scan on one CPU core.
+published two-stage numbers. About 20-30 s per 128-beam scan on one CPU core
+with the published model.
 
 Output: one CODa-style JSON per frame (`3d_bbox_os1_<seq>_<frame>.json`) with
 an added `score`, readable by convert_coda.py --lidar-detections.
@@ -54,7 +59,10 @@ TO_CODA = {
     "ServiceVehicle": "Service Vehicle", "UtilityVehicle": "Utility Vehicle", "Segway": "Segway",
     "Bus": "Bus", "Skateboard": "Skateboard",
 }
+# Pedestrian-only CenterPoint (scripts/runpod/cfgs/coda_ped_centerpoint.yaml).
+PED_CLASS_NAMES = ["Pedestrian"]
 POINT_RANGE = np.array([-75.2, -75.2, -2.0, 75.2, 75.2, 4.0])
+PED_POINT_RANGE = np.array([-51.2, -51.2, -2.0, 51.2, 51.2, 4.0])
 VOXEL_SIZE = np.array([0.1, 0.1, 0.15])
 SHIFT_Z = 0.8  # DATA_CONFIG.SHIFT_COOR: points are lifted by 0.8 m before voxelization
 MAX_POINTS_PER_VOXEL = 5
@@ -140,13 +148,13 @@ def bn_relu_2d(x: torch.Tensor, sd: dict, prefix: str) -> torch.Tensor:
 
 
 # --- network --------------------------------------------------------------------
-def voxelize(points: np.ndarray) -> Sparse:
+def voxelize(points: np.ndarray, point_range: np.ndarray) -> Sparse:
     xyz = points[:, :3].astype(np.float64).copy()
     xyz[:, 2] += SHIFT_Z
-    inside = np.all((xyz >= POINT_RANGE[:3]) & (xyz < POINT_RANGE[3:]), axis=1)
+    inside = np.all((xyz >= point_range[:3]) & (xyz < point_range[3:]), axis=1)
     xyz = xyz[inside]
-    grid = np.round((POINT_RANGE[3:] - POINT_RANGE[:3]) / VOXEL_SIZE).astype(int)  # (x, y, z)
-    idx = np.floor((xyz - POINT_RANGE[:3]) / VOXEL_SIZE).astype(np.int64)
+    grid = np.round((point_range[3:] - point_range[:3]) / VOXEL_SIZE).astype(int)  # (x, y, z)
+    idx = np.floor((xyz - point_range[:3]) / VOXEL_SIZE).astype(np.int64)
     keys = (idx[:, 2] * grid[1] + idx[:, 1]) * grid[0] + idx[:, 0]
     # Keep the first MAX_POINTS_PER_VOXEL points of each voxel, then average them (MeanVFE).
     order = np.argsort(keys, kind="stable")
@@ -222,16 +230,16 @@ def center_head(x: torch.Tensor, sd: dict) -> dict[str, torch.Tensor]:
     return out
 
 
-def decode(head: dict[str, torch.Tensor], score_threshold: float, max_objects: int = 500):
+def decode(head: dict[str, torch.Tensor], score_threshold: float, point_range: np.ndarray, max_objects: int = 500):
     heat = torch.sigmoid(head["hm"])
     classes, h, w = heat.shape
-    scores, flat = torch.topk(heat.reshape(-1), max_objects)
+    scores, flat = torch.topk(heat.reshape(-1), min(max_objects, heat.numel()))
     keep = scores >= score_threshold
     scores, flat = scores[keep], flat[keep]
     cls = flat // (h * w)
     ys, xs = (flat % (h * w)) // w, flat % w
-    cx = (xs.float() + head["center"][0, ys, xs]) * FEATURE_STRIDE * VOXEL_SIZE[0] + POINT_RANGE[0]
-    cy = (ys.float() + head["center"][1, ys, xs]) * FEATURE_STRIDE * VOXEL_SIZE[1] + POINT_RANGE[1]
+    cx = (xs.float() + head["center"][0, ys, xs]) * FEATURE_STRIDE * VOXEL_SIZE[0] + point_range[0]
+    cy = (ys.float() + head["center"][1, ys, xs]) * FEATURE_STRIDE * VOXEL_SIZE[1] + point_range[1]
     cz = head["center_z"][0, ys, xs] - SHIFT_Z
     dims = torch.exp(head["dim"][:, ys, xs]).T
     yaw = torch.atan2(head["rot"][1, ys, xs], head["rot"][0, ys, xs])
@@ -261,10 +269,21 @@ def rotated_nms(boxes, scores, threshold: float):
     return np.array(kept, dtype=int)
 
 
+def model_config(sd: dict) -> tuple[list[str], np.ndarray]:
+    """Class names and point range of the checkpoint, told apart by the heatmap's class count."""
+    classes = sd["dense_head.heads_list.0.hm.1.weight"].shape[0]
+    if classes == len(CLASS_NAMES):
+        return CLASS_NAMES, POINT_RANGE
+    if classes == len(PED_CLASS_NAMES):
+        return PED_CLASS_NAMES, PED_POINT_RANGE
+    raise ValueError(f"unknown checkpoint: {classes} heatmap classes")
+
+
 @torch.no_grad()
 def detect(points: np.ndarray, sd: dict, score_threshold: float, nms_threshold: float):
-    features = backbone_2d(backbone_3d(voxelize(points), sd), sd)
-    boxes, scores, cls = decode(center_head(features, sd), score_threshold)
+    _, point_range = model_config(sd)
+    features = backbone_2d(backbone_3d(voxelize(points, point_range), sd), sd)
+    boxes, scores, cls = decode(center_head(features, sd), score_threshold, point_range)
     keep = rotated_nms(boxes, scores, nms_threshold)
     return boxes[keep], scores[keep], cls[keep]
 
@@ -304,6 +323,7 @@ def main() -> None:
 
     checkpoint = torch.load(args.ckpt, map_location="cpu", weights_only=False)
     sd = {k: v.float() for k, v in checkpoint["model_state"].items() if v.is_floating_point()}
+    class_names, _ = model_config(sd)
     args.out.mkdir(parents=True, exist_ok=True)
     seq = args.sequence
     if args.scan_pattern is None and (args.coda_root is None or seq is None):
@@ -326,7 +346,7 @@ def main() -> None:
         boxes, scores, cls = detect(points, sd, args.score_threshold, args.nms_threshold)
         records = []
         for box, score, c in zip(boxes, scores, cls):
-            name = CLASS_NAMES[c]
+            name = class_names[c]
             records.append({
                 "classId": TO_CODA.get(name, name), "modelClass": name, "score": round(float(score), 4),
                 "cX": float(box[0]), "cY": float(box[1]), "cZ": float(box[2]) - args.z_offset,
