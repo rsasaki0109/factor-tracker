@@ -50,6 +50,24 @@ in the LiDAR (os1) frame, as `scripts/coda/detect_lidar_cpu.py` and
 `scripts/runpod/detect_coda_pvrcnn.py` write it. Only `classId == "Pedestrian"`
 is tracked.
 
+## Training on RunPod (October 2026)
+
+`scripts/runpod/coda_train_ped.sh` does everything on one pod: installs the
+coda-models environment (`setup_coda_models.sh`), fetches every third
+labelled scan outside the evaluation windows
+(`scripts/coda/fetch_coda_training.py`: 8513 scans, 11.8 GB, about 30 min),
+trains `scripts/runpod/cfgs/coda_ped_centerpoint.yaml` with
+`train_coda_ped.py`, and detects on the eight evaluation windows with the new
+model and with the published PV-RCNN. Start it with `pod_start.sh` and
+`RUN_SCRIPT=coda_train_ped.sh MODE=smoke|full RESULT=coda_train_ped.tar.gz`
+on image `pytorch/pytorch:1.10.0-cuda11.3-cudnn8-devel` (Python 3.7) with a
+60 GB volume. `MODE=smoke` (300 scans, 200 iterations, one window) checks
+every step in about 10 minutes.
+
+Measured on an A40: 0.33 s per iteration at batch 4 (2.4 GB of GPU memory),
+11.5 min per epoch of 8513 scans, so 20 epochs take about 3.8 h; the whole run
+is about 4.5 h, about $2.7 at $0.59/h.
+
 ## The evaluation windows (keep them out of training)
 
 | split | sequence | scans |
