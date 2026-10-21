@@ -98,8 +98,13 @@ association; score threshold chosen on dev, ties broken by IDF1):
 
 The fine-tuned model ties with the baseline (-0.003 dev, +0.007 held-out,
 within what separates thresholds); it is pedestrian-only and covers +-51.2 m
-instead of +-75.2 m, so on the CPU it would be faster for the same accuracy,
-but `detect_lidar_cpu.py` does not load it yet. Total pod cost of both runs
+instead of +-75.2 m, so it is faster for the same accuracy.
+`scripts/coda/detect_lidar_cpu.py` runs it (pass its checkpoint as `--ckpt`;
+the model is recognised from the number of classes): about 1.5 s per scan
+on one core against 2.5 s for the published model, with boxes within 5 mm
+and scores within 0.007 of OpenPCDet on the GPU and the same tracking scores
+on all eight windows. The checkpoint is not in the repository; rebuild it
+with `INIT=published` (about $2, 2.5 h on an A40). Total pod cost of both runs
 with their smoke tests: about $4.7.
 
 Pedestrian detection on the scans of CODa's own *testing* split inside the

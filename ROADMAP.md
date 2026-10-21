@@ -15,9 +15,9 @@ each group.
   Neither the published CODa PV-RCNN's second stage nor a pedestrian
   detector trained on RunPod (from scratch, or fine-tuned from the published
   first stage) beats the published first stage on pedestrian tracking; the
-  fine-tuned one ties (`docs/detector_training.md`). Next: train on every
-  labelled scan for longer, or ship the fine-tuned pedestrian-only model in
-  the CPU detector for speed (+-51.2 m instead of +-75.2 m).
+  fine-tuned one ties (`docs/detector_training.md`) and runs in
+  `detect_lidar_cpu.py` about 1.7x faster (pedestrian-only, +-51.2 m).
+  Next: train on every labelled scan for longer.
 
 ## Filtering and fusion
 
