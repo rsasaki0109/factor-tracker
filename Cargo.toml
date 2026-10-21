@@ -1,6 +1,11 @@
 [workspace]
 resolver = "2"
-members = ["crates/perception-core", "crates/perception-engine", "crates/perception-cli"]
+members = [
+    "crates/perception-core",
+    "crates/perception-engine",
+    "crates/perception-cli",
+    "crates/perception-wasm",
+]
 
 [workspace.package]
 version = "0.1.0"

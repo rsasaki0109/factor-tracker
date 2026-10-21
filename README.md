@@ -101,6 +101,8 @@ perception-engine/
   crates/perception-core/    tracking core (types, filter, assignment, lifecycle, trackers)
   crates/perception-engine/  camera-assisted LiDAR SDK (calibration, projection, async, eval, KITTI)
   crates/perception-cli/     CLI, JSONL schemas, scenarios, reports
+  crates/perception-wasm/    2D tracker exported to WebAssembly for the browser demo
+  web/                       browser demo: phone camera -> person detector -> tracker (GitHub Pages)
   scripts/kitti/             KITTI tracking conversion and multi-sequence evaluation (Python + NumPy)
   scripts/coda/              CODa (robot dataset) frame fetch, CPU LiDAR detector, conversion to engine JSONL
   scripts/grandtour/         GrandTour (ANYmal + Livox Mid-360 + cameras) conversion to engine JSONL
@@ -109,7 +111,7 @@ perception-engine/
   scripts/runpod/            GPU detector runs (OpenPCDet, Ultralytics) on a RunPod pod
   docs/                      architecture, data format, algorithms, camera-lidar, datasets, evaluation
   assets/                    demo assets (hero image)
-  .github/workflows/         CI
+  .github/workflows/         CI and the GitHub Pages deployment of web/
 ```
 
 ## Camera-assisted LiDAR tracking (SDK)
