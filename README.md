@@ -60,14 +60,16 @@ dependency. Numeric work uses `f64`.
 
 ## What it is not
 
-- It is **not** a detector: no model training or inference, no raw image,
-  point-cloud or radar-signal processing, no monocular depth.
+- It is **not** a detector: the engine takes detections as input and does no
+  raw image, point-cloud or radar-signal processing and no monocular depth.
+  (The evaluation scripts run a LiDAR detector on CODa; see
+  `docs/detector_training.md`.)
 - It does **not** estimate 3D orientation or extent. `Cartesian3DTracker` is
   position tracking, not full 3D box tracking.
 - There is no appearance/ReID model, no EKF/UKF, no JPDA/MHT, no
   track-to-track fusion, no out-of-sequence measurement handling, no
-  auto-calibration, no ego-motion estimation, no ROS/Python bindings and no GUI
-  framework. See `ROADMAP.md`.
+  auto-calibration, no ego-motion estimation, no Python bindings and no GUI
+  framework (a ROS 2 node is in `ros2/`). See `ROADMAP.md`.
 - It is **not** ByteTrack or DeepSORT. Those systems combine specific detectors,
   appearance models and association strategies. This is a plain linear Kalman
   filter with IoU/Mahalanobis gating and Hungarian assignment, plus lifecycle

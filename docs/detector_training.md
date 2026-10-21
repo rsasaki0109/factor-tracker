@@ -1,12 +1,12 @@
 # Training a CODa pedestrian detector (handoff)
 
 Status as of October 2026, for whoever picks this up next (on a laptop GPU).
-Everything below is on branch `claude/dreamy-noether-2h4v4t`.
 
 ## Why
 
 On the CODa evaluation windows the detector, not the tracker, now limits the
-scores (`docs/evaluation.md`, "Standard metrics against baseline trackers"):
+scores (`docs/evaluation.md`, "Standard metrics against baseline trackers";
+measured with the earlier scoring that also kept the other dynamic classes):
 
 | on the same CODa dev windows | HOTA |
 | --- | --- |

@@ -490,7 +490,12 @@ pedestrian prior, 1 m gate; ID switches (coverage):
 distance-based similarity (s = 1 - d / 1 m; the outputs carry positions, not
 boxes), and `scripts/eval/baselines.py` re-implements AB3DMOT- and
 SimpleTrack-style trackers on the engine's own detections, so every tracker
-sees the same inputs (CODa PV-RCNN, CPU, score >= 0.4). All settings were
+sees the same inputs (CODa PV-RCNN, CPU, score >= 0.4). These inputs and the
+truth include every CODa dynamic class the detector reports (pedestrians,
+scooters, cyclists, ...); `scripts/eval/coda_tracker_eval.sh` now scores
+pedestrians only, where the engine and AB3DMOT-style score 0.618 / 0.618 on
+dev and 0.768 / 0.764 on held-out windows (`docs/detector_training.md`).
+All settings were
 chosen on the five development windows above; the held-out windows
 (sequences 3, 4 and 9, 160 scans each, not used before) were scored once
 with those settings.

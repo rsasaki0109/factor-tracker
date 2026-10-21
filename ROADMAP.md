@@ -51,16 +51,26 @@ each group.
   encounter better, and combine it with an IMM motion model.
 - Distance association for people (`--max-association-distance-m 1.0
   --recent-track-window-ns 0`, the ROS 2 node's default) puts the engine level
-  with an AB3DMOT-style tracker on CODa dev and slightly ahead on held-out
-  windows (HOTA 0.710 / 0.705). Perfect association on the same detections
-  would reach dev HOTA 0.659 (now 0.615); perfect detections 0.836.
+  with an AB3DMOT-style tracker on CODa pedestrians (published first-stage
+  detections, score >= 0.4; HOTA 0.618 / 0.618 on dev, 0.768 / 0.764 on
+  held-out windows). With the earlier scoring, which also kept the other
+  dynamic classes, perfect association on the same detections reached dev
+  HOTA 0.659 (engine 0.615) and perfect detections 0.836; not yet re-measured
+  on pedestrians only.
 - Learned or adaptive gating thresholds.
 
 ## Implemented since the initial version
 
 - Matching cascade for 3D association (`recent_track_window_ns`).
 - Real-dataset harness for KITTI tracking and CODa (`scripts/kitti`,
-  `scripts/coda`), including CPU inference of the CODa PV-RCNN first stage.
+  `scripts/coda`), including CPU inference of the CODa PV-RCNN first stage
+  and of a pedestrian detector fine-tuned from it
+  (https://huggingface.co/rsasaki0109/coda-ped-centerpoint).
+- ROS 2 node (`ros2/factor_tracker_ros`, Jazzy): `vision_msgs/Detection3DArray`
+  in, tracks with covariance out; the tracking runs in `factor-tracker
+  stream` as a child process.
+- WebAssembly build of the 2D tracker (`crates/factor-tracker-wasm`) and a
+  browser camera demo (`web/`).
 
 ## Implemented in the camera-assisted LiDAR SDK
 
@@ -84,9 +94,8 @@ each group.
 - Radar adapters and radar observation models.
 - Camera distortion models other than a rectified pinhole.
 - Non-linear (EKF/UKF) camera updates.
-- ROS 2 adapter.
 - Python bindings.
-- Wasm bindings.
+- 3D tracking in the browser demo (it tracks camera boxes only).
 - More datasets (KITTI tracking and CODa are supported through scripts).
 
 ## Performance
@@ -105,6 +114,7 @@ each group.
 
 ## Explicitly out of scope for now
 
-- Object detection model training or inference.
+- Object detection inside the engine crates: they take detections as input.
+  Detectors live in `scripts/` for evaluation and demos (`docs/detector_training.md`).
 - Monocular depth estimation.
 - Large front-end application frameworks.
