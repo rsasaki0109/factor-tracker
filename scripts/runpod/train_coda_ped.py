@@ -12,7 +12,8 @@ augmentation and the optimizer; run from coda-models/tools:
         --cfg /workspace/pe/scripts/runpod/cfgs/coda_ped_centerpoint.yaml \
         --coda-root /workspace/CODa --out /workspace/train
 
-Writes `<out>/checkpoint_epoch_<n>.pth` after every epoch and logs the loss
+`--init-ckpt` fine-tunes from the published checkpoint instead of training
+from scratch. Writes `<out>/checkpoint_epoch_<n>.pth` after every epoch and logs the loss
 and the time per iteration. `--max-iters` stops early (a smoke test that
 measures speed).
 """
@@ -36,6 +37,8 @@ from pcdet.utils import common_utils
 
 sys.path.insert(0, str(Path.cwd()))  # coda-models/tools, for train_utils
 from train_utils.optimization import build_optimizer, build_scheduler  # noqa: E402
+
+from init_from_published import load_published  # noqa: E402
 
 
 class CodaFrames(DatasetTemplate):
@@ -75,6 +78,8 @@ def main() -> None:
     parser.add_argument("--batch", type=int, help="override OPTIMIZATION.BATCH_SIZE_PER_GPU")
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--max-iters", type=int, help="stop after this many iterations (smoke test)")
+    parser.add_argument("--init-ckpt", type=Path,
+                        help="start from the published CODa PV-RCNN checkpoint (init_from_published.py)")
     parser.add_argument("--set", nargs=2, action="append", default=[], metavar=("KEY", "VALUE"))
     args = parser.parse_args()
 
@@ -91,7 +96,10 @@ def main() -> None:
     loader = torch.utils.data.DataLoader(dataset, batch_size=batch, shuffle=True, num_workers=args.workers,
                                          collate_fn=dataset.collate_batch, drop_last=True, pin_memory=True,
                                          persistent_workers=args.workers > 0)
-    model = build_network(model_cfg=cfg.MODEL, num_class=len(cfg.CLASS_NAMES), dataset=dataset).cuda()
+    model = build_network(model_cfg=cfg.MODEL, num_class=len(cfg.CLASS_NAMES), dataset=dataset)
+    if args.init_ckpt:
+        load_published(model, args.init_ckpt, list(cfg.CLASS_NAMES), logger)
+    model = model.cuda()
     model.train()
     optimizer = build_optimizer(model, cfg.OPTIMIZATION)
     scheduler, _ = build_scheduler(optimizer, total_iters_each_epoch=len(loader), total_epochs=epochs,
