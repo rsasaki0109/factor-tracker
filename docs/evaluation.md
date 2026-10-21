@@ -25,7 +25,7 @@ sensor failure.
 
 ## Metrics
 
-All metrics are computed by `perception_engine::eval`. Matching condition: at
+All metrics are computed by `factor_tracker_engine::eval`. Matching condition: at
 each evaluated timestamp, tracks and ground-truth objects are matched one-to-one
 by Euclidean distance with a hard gate (`EvalConfig::match_distance_m`, default
 2 m; `evaluate --match-distance-m`). Only **confirmed** tracks are matched
@@ -71,7 +71,7 @@ In the synthetic fixture the LiDAR association is unambiguous, so
 `camera_assisted` does not change the tracking result relative to
 `camera_associated`. The engine test suite contains a separate, constructed
 ambiguous example where the camera class prior changes which LiDAR detection is
-associated (see `crates/perception-engine/tests/camera_lidar.rs`). That
+associated (see `crates/factor-tracker-engine/tests/camera_lidar.rs`). That
 constructed example is a mechanism check only and is **not** evidence of a
 general real-world accuracy improvement.
 
@@ -148,7 +148,7 @@ shrinks: when two tracks sit on one object, the coasting one takes the
 observation back, the other starts coasting, and the two alternate. The
 engine therefore associates in two stages (the "matching cascade" of
 DeepSORT): tracks observed within `recent_track_window_ns` first, the
-remaining tracks against the leftover observations. In `perception-core` the
+remaining tracks against the leftover observations. In `factor-tracker-core` the
 option defaults to off; the engine uses 350 ms (at 10 Hz: tolerate up to two
 missed scans before a track loses priority).
 
@@ -238,7 +238,7 @@ camera, matches it to a YOLO box of the same frame (IoU >= 0.3) and stores a
 DINOv2 ViT-S/14 embedding of the crop (140x70, frozen, no ReID training) in the
 detection's `appearance` field; the tracker adds
 `appearance_weight * (1 - cos)` to the association cost and keeps a moving
-average per track (`perception-core`, off by default).
+average per track (`factor-tracker-core`, off by default).
 
 - The features separate people: cosine distance between the same person in
   consecutive frames has median 0.165 (90th percentile 0.28), between
@@ -443,7 +443,7 @@ persistence 3):
 ### Fixed-lag re-association (FGO)
 
 `--fgo-lag N` (replay, stream, and the ROS 2 node's `fgo_lag`) passes the
-engine's LiDAR frames through `perception_engine::fgo::FixedLagRefiner`: over
+engine's LiDAR frames through `factor_tracker_engine::fgo::FixedLagRefiner`: over
 the last N scans it re-decides which detection belongs to which person by the
 trajectories' factor-graph cost (constant-velocity motion and position
 factors; the optimum's cost is the Kalman prediction-error decomposition)
@@ -553,7 +553,7 @@ What this supports:
 ## Reproducing
 
 ```sh
-cargo run -p perception-cli -- cam-demo --out-dir cam-demo-out
+cargo run -p factor-tracker -- cam-demo --out-dir cam-demo-out
 # comparison table: cam-demo-out/comparison.json
 # report:           cam-demo-out/report.html
 ```
@@ -561,7 +561,7 @@ cargo run -p perception-cli -- cam-demo --out-dir cam-demo-out
 To inject faults:
 
 ```sh
-cargo run -p perception-cli -- cam-demo --out-dir cam-demo-out \
+cargo run -p factor-tracker -- cam-demo --out-dir cam-demo-out \
     --camera-delay-ns 150000000 --lidar-delay-ns 0 \
     --reverse-window 3 --duplicate-every 7 \
     --pause-sensor camera --pause-start-ns 1000000000 --pause-end-ns 2000000000

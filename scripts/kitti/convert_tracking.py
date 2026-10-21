@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Converts the KITTI tracking benchmark into the per-sequence layout read by
-`perception-cli prepare` (see docs/datasets.md).
+`factor-tracker prepare` (see docs/datasets.md).
 
 Input (the official archives unpacked into one root):
 

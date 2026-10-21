@@ -6,8 +6,8 @@
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd); repo=$(cd "$here/../.." && pwd)
 work=${1:-$(mktemp -d)}; mkdir -p "$work"
-cargo build --release -q -p perception-cli --manifest-path "$repo/Cargo.toml"
-cli=$repo/target/release/perception-cli
+cargo build --release -q -p factor-tracker --manifest-path "$repo/Cargo.toml"
+cli=$repo/target/release/factor-tracker
 for f in setup.json inputs.jsonl truth.jsonl; do gzip -dc "$here/$f.gz" > "$work/$f"; done
 prior="--initial-velocity-variance 1 --accel-spectral-density 0.5"
 printf "%-36s %8s %9s\n" config switches coverage

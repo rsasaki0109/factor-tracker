@@ -13,8 +13,8 @@ seq=$1; first=$2; last=$3; work=$4
 repo=$(cd "$(dirname "$0")/../.." && pwd)
 PY=${PY:-python3}; CKPT=${CKPT:-$work/coda128_allclass_bestoracle.pth}; YOLO=${YOLO:-yolo26x.pt}; JOBS=${JOBS:-4}
 coda=$work/CODa; name=coda${seq}_${first}; det=$work/det/$name; seqs=$work/seq
-cli=$repo/target/release/perception-cli
-cargo build --release -q -p perception-cli --manifest-path "$repo/Cargo.toml"
+cli=$repo/target/release/factor-tracker
+cargo build --release -q -p factor-tracker --manifest-path "$repo/Cargo.toml"
 
 "$PY" "$repo/scripts/coda/fetch_coda.py" --coda-root "$coda" --sequence "$seq" --first "$first" --last "$last"
 "$PY" "$repo/scripts/runpod/detect_camera_yolo.py" --image-dir "$coda/2d_rect/cam0/$seq" --out-dir "$det/camera" \

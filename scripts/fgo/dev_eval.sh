@@ -5,7 +5,7 @@
 #   <data-dir>/coda/<window>/{setup,inputs,truth}.json(l), <data-dir>/eth2/...
 set -euo pipefail
 data=$1; work=$2; shift 2
-repo=$(cd "$(dirname "$0")/../.." && pwd); cli=$repo/target/release/perception-cli
+repo=$(cd "$(dirname "$0")/../.." && pwd); cli=$repo/target/release/factor-tracker
 prior="--initial-velocity-variance 1 --accel-spectral-density 0.5"
 mkdir -p "$work"
 score() {  # output truth setup zone-flags -> "switches coverage"

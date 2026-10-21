@@ -1,0 +1,27 @@
+[package]
+name = "factor-tracker"
+description = "Command line interface and demos for factor-tracker."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+factor-tracker-core.workspace = true
+factor-tracker-engine.workspace = true
+nalgebra.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+approx.workspace = true
+
+[[bin]]
+name = "factor-tracker"
+path = "src/main.rs"

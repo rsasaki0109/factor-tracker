@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 r"""Converts a frame range of one CODa sequence (UT Campus Object Dataset,
 Clearpath Husky robot) into engine JSONL: setup.json, inputs.jsonl and
-truth.jsonl, ready for `perception-cli replay` / `evaluate`.
+truth.jsonl, ready for `factor-tracker replay` / `evaluate`.
 
 Frames and conventions:
 - reference frame: the Ouster OS1-128 (`os1`, x forward, y left, z up);

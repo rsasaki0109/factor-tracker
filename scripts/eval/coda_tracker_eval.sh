@@ -18,8 +18,8 @@
 set -euo pipefail
 dets=$1; coda=$2; th=${3:-0.4}; work=${4:-$(mktemp -d)}
 mkdir -p "$work"
-repo=$(cd "$(dirname "$0")/../.." && pwd); PY=${PY:-python3}; cli=$repo/target/release/perception-cli
-cargo build --release -q -p perception-cli --manifest-path "$repo/Cargo.toml"
+repo=$(cd "$(dirname "$0")/../.." && pwd); PY=${PY:-python3}; cli=$repo/target/release/factor-tracker
+cargo build --release -q -p factor-tracker --manifest-path "$repo/Cargo.toml"
 DEV="13:9700:9860 20:12700:12860 20:4820:4980 20:8640:8800 20:9330:9490"
 HELDOUT="3:1800:1959 4:6870:7029 9:8515:8674"
 prior="--initial-velocity-variance 1 --accel-spectral-density 0.5 --report-coast-ms 0"

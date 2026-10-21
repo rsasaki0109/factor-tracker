@@ -4,8 +4,8 @@
 # back and convert with scripts/coda/convert_coda.py --lidar-detections.
 #
 # usage (inside the pod, PyTorch template):
-#   cd /workspace && git clone -b <branch> https://github.com/rsasaki0109/perception-engine.git
-#   bash perception-engine/scripts/runpod/coda_pvrcnn.sh
+#   cd /workspace && git clone -b <branch> https://github.com/rsasaki0109/factor-tracker.git
+#   bash factor-tracker/scripts/runpod/coda_pvrcnn.sh
 set -euo pipefail
 
 repo=$(cd "$(dirname "$0")/../.." && pwd)

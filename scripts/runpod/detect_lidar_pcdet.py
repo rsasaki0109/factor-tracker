@@ -8,7 +8,7 @@ scripts/kitti/convert_tracking.py --detections-root expects.
 Run from OpenPCDet/tools so the model config's _BASE_CONFIG_ resolves:
 
     cd /workspace/OpenPCDet/tools
-    python /workspace/perception-engine/scripts/runpod/detect_lidar_pcdet.py \
+    python /workspace/factor-tracker/scripts/runpod/detect_lidar_pcdet.py \
         --kitti-root /workspace/kitti --out /workspace/pe-out/detections \
         --cfg cfgs/kitti_models/pointpillar.yaml --ckpt /workspace/ckpt/pointpillar_7728.pth
 """

@@ -1,7 +1,7 @@
 # KITTI tracking on a RunPod GPU pod
 
 These scripts run real detectors over the KITTI tracking benchmark and feed
-the results to `perception-cli`. The GPU is used only to produce detections;
+the results to `factor-tracker`. The GPU is used only to produce detections;
 the engine itself stays CPU-only.
 
 ```
@@ -24,8 +24,8 @@ KITTI tracking ──► detect_lidar_pcdet.py (OpenPCDet, GPU) ──┐
 
 ```sh
 cd /workspace
-git clone https://github.com/rsasaki0109/perception-engine.git
-bash perception-engine/scripts/runpod/setup.sh
+git clone https://github.com/rsasaki0109/factor-tracker.git
+bash factor-tracker/scripts/runpod/setup.sh
 ```
 
 ## 2. Data
@@ -34,7 +34,7 @@ Accept the KITTI terms at <https://www.cvlibs.net/datasets/kitti/> first. The
 data is not redistributed by this repository.
 
 ```sh
-KITTI_ROOT=/workspace/kitti bash perception-engine/scripts/runpod/download_kitti_tracking.sh
+KITTI_ROOT=/workspace/kitti bash factor-tracker/scripts/runpod/download_kitti_tracking.sh
 ```
 
 ## 3. Checkpoint
@@ -51,7 +51,7 @@ detector and must not be read as a held-out result.
 ## 4. Run
 
 ```sh
-cd /workspace/perception-engine
+cd /workspace/factor-tracker
 PCDET_CKPT=/workspace/ckpt/pointpillar_7728.pth bash scripts/runpod/run_all.sh          # all 21 sequences
 PCDET_CKPT=/workspace/ckpt/pointpillar_7728.pth bash scripts/runpod/run_all.sh 0000 0001 # a subset
 ```
@@ -65,7 +65,7 @@ Outputs under `$OUT`:
 | --- | --- |
 | `detections/{lidar,camera}/<seq>/<frame>.txt` | raw detector output, KITTI text format |
 | `detections.tar.gz` | the same, archived for download |
-| `sequences/<seq>/` | layout read by `perception-cli prepare` |
+| `sequences/<seq>/` | layout read by `factor-tracker prepare` |
 | `results/<seq>/` | per-mode outputs, metrics, diagnostics, `report.html` |
 | `results/summary.md`, `summary.json` | metrics aggregated over sequences |
 
@@ -94,8 +94,8 @@ packs the detections:
 
 ```sh
 cd /workspace
-git clone -b claude/dreamy-noether-2h4v4t https://github.com/rsasaki0109/perception-engine.git
-bash perception-engine/scripts/runpod/coda_pvrcnn_orig.sh
+git clone -b claude/dreamy-noether-2h4v4t https://github.com/rsasaki0109/factor-tracker.git
+bash factor-tracker/scripts/runpod/coda_pvrcnn_orig.sh
 # -> /workspace/coda_pvrcnn_dets.tar.gz (a few MB)
 ```
 

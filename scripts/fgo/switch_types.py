@@ -2,7 +2,7 @@
 """Classifies the ID switches of a tracker output against truth.
 
 Matching per frame: Hungarian between truth objects and confirmed tracks
-within `--match` metres (as perception-cli evaluate). For each switch of a
+within `--match` metres (as factor-tracker evaluate). For each switch of a
 truth object from track A to track B:
 
   fragment   B is new (first matched within the last few frames) and A is no

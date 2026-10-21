@@ -24,8 +24,8 @@ results=$2
 shift 2
 
 repo=$(cd "$(dirname "$0")/../.." && pwd)
-cargo build --release -q -p perception-cli --manifest-path "$repo/Cargo.toml"
-cli="$repo/target/release/perception-cli"
+cargo build --release -q -p factor-tracker --manifest-path "$repo/Cargo.toml"
+cli="$repo/target/release/factor-tracker"
 modes=(lidar_only camera_associated camera_assisted)
 
 if [[ $# -gt 0 ]]; then

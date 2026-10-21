@@ -1,6 +1,6 @@
 name: Pages
 
-# Builds the browser demo (web/ plus crates/perception-wasm) and publishes it
+# Builds the browser demo (web/ plus crates/factor-tracker-wasm) and publishes it
 # with GitHub Pages. Needs Settings -> Pages -> Source: "GitHub Actions".
 on:
   push:
@@ -26,12 +26,12 @@ jobs:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
       - name: Build the tracker for WebAssembly
-        run: cargo build --release --target wasm32-unknown-unknown -p perception-wasm
+        run: cargo build --release --target wasm32-unknown-unknown -p factor-tracker-wasm
       - name: Assemble the site
         run: |
           mkdir -p site
           cp web/index.html web/app.js web/tracker.js site/
-          cp target/wasm32-unknown-unknown/release/perception_wasm.wasm site/
+          cp target/wasm32-unknown-unknown/release/factor_tracker_wasm.wasm site/
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Camera Person Tracking</title>
-<meta name="description" content="perception-engine in the browser: on-device person detection and tracking from the phone camera.">
+<meta name="description" content="Factor Graph Object Tracker in the browser: on-device person detection and tracking from the phone camera.">
 <style>
   :root {
     --bg: #f6f7f9; --fg: #16181d; --muted: #5b6270; --card: #ffffff; --line: #d9dde4;
@@ -61,7 +61,7 @@
 <body>
 <main>
   <h1>Camera person tracking</h1>
-  <p class="lead">perception-engine's tracker (Rust → WebAssembly) on person detections from the camera. Everything runs on this device; no video leaves it.</p>
+  <p class="lead">The Factor Graph Object Tracker (Rust → WebAssembly) on person detections from the camera. Everything runs on this device; no video leaves it.</p>
   <div class="controls">
     <button id="start" class="primary">Start camera</button>
     <button id="flip" disabled>Switch camera</button>
@@ -85,7 +85,7 @@
   <p class="note">
     Detector: MediaPipe EfficientDet-Lite0 (COCO “person”), GPU delegate with CPU fallback.
     Tracker: constant-velocity Kalman filter with IoU association from
-    <a href="https://github.com/rsasaki0109/perception-engine">perception-engine</a>.
+    <a href="https://github.com/rsasaki0109/factor-tracker">factor-tracker</a>.
     Solid boxes are confirmed tracks, dashed ones are not yet confirmed or briefly lost.
   </p>
 </main>

@@ -3,7 +3,7 @@
 `index.html` runs on a phone or desktop browser: camera frames go to
 MediaPipe's EfficientDet-Lite0 person detector (WebGL GPU delegate, CPU
 fallback), its boxes to this repository's 2D tracker compiled to WebAssembly
-(`crates/perception-wasm`), and the confirmed tracks are drawn over the video
+(`crates/factor-tracker-wasm`), and the confirmed tracks are drawn over the video
 with their IDs. Nothing is uploaded; camera access needs HTTPS (or localhost).
 
 Camera only for now: boxes and IDs in the image, no metric positions.
@@ -12,8 +12,8 @@ Run locally:
 
 ```sh
 rustup target add wasm32-unknown-unknown
-cargo build --release --target wasm32-unknown-unknown -p perception-wasm
-cp target/wasm32-unknown-unknown/release/perception_wasm.wasm web/
+cargo build --release --target wasm32-unknown-unknown -p factor-tracker-wasm
+cp target/wasm32-unknown-unknown/release/factor_tracker_wasm.wasm web/
 python3 -m http.server -d web 8000   # http://localhost:8000
 ```
 

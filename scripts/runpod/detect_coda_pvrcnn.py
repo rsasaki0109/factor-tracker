@@ -16,7 +16,7 @@ Run from coda-models/tools so the config's _BASE_CONFIG_ paths resolve (the
 installed upstream `pcdet` package is the one imported):
 
     cd /workspace/coda-models/tools
-    python /workspace/perception-engine/scripts/runpod/detect_coda_pvrcnn.py \
+    python /workspace/factor-tracker/scripts/runpod/detect_coda_pvrcnn.py \
         --cfg cfgs/da-coda-coda_models/waymocenterhead/pvrcnn_allclass128full_finetune_headfull.yaml \
         --ckpt /workspace/coda128_allclass_bestoracle.pth --coda-root /workspace/CODa \
         --out /workspace/coda_pvrcnn --window 20 8640 8799 --window 4 6870 7029

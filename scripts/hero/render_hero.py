@@ -25,7 +25,7 @@ The README hero (CODa, robot) was produced with:
         EVAL_ARGS="--match-distance-m 1" scripts/kitti/evaluate_sequences.sh coda-seq coda-res 20
     python3 scripts/hero/render_hero.py coda-res/20 assets/hero.gif --dataset coda --data-root CODa \
         --start 30 --frames 80 --width 840 --colors 128 \
-        --subtitle "CODa seq 20 · Clearpath Husky in a campus crowd · LiDAR: CODa PV-RCNN (first stage, run on CPU) · camera: YOLO11x · tracks: perception-engine"
+        --subtitle "CODa seq 20 · Clearpath Husky in a campus crowd · LiDAR: CODa PV-RCNN (first stage, run on CPU) · camera: YOLO11x · tracks: factor-tracker"
 
 The earlier KITTI version:
 
@@ -188,7 +188,7 @@ class Renderer:
         W = self.width
         img = Image.new("RGB", (W, self.height), SURFACE)
         d = ImageDraw.Draw(img)
-        d.text((MARGIN, 18), "perception-engine", font=F_TITLE, fill=TEXT)
+        d.text((MARGIN, 18), "factor-tracker", font=F_TITLE, fill=TEXT)
         d.text((MARGIN + 262, 30), "camera-assisted LiDAR tracking in Rust", font=F_SUB, fill=TEXT_2)
         d.text((MARGIN, 56), self.args.subtitle, font=F_SMALL, fill=TEXT_3)
 
@@ -353,7 +353,7 @@ PRESETS = {
     "kitti": {
         "image_pattern": "{root}/training/image_02/{seq}/{{frame:06d}}.png",
         "scan_pattern": "{root}/training/velodyne/{seq}/{{frame:06d}}.bin",
-        "subtitle": "KITTI tracking {seq} · LiDAR: ground-truth boxes as oracle detections · camera: YOLO11x · tracks: perception-engine",
+        "subtitle": "KITTI tracking {seq} · LiDAR: ground-truth boxes as oracle detections · camera: YOLO11x · tracks: factor-tracker",
         "attribution": "KITTI images, scans and labels: Geiger et al., CC BY-NC-SA 3.0",
         "lidar_name": "Velodyne",
         "ego_name": "ego vehicle",
@@ -371,7 +371,7 @@ PRESETS = {
     "coda": {
         "image_pattern": "{root}/2d_rect/cam0/{seq}/2d_rect_cam0_{seq}_{{frame}}.png",
         "scan_pattern": "{root}/3d_comp/os1/{seq}/3d_comp_os1_{seq}_{{frame}}.bin",
-        "subtitle": "CODa sequence {seq} · Clearpath Husky robot on a university campus · camera: YOLO11x · tracks: perception-engine",
+        "subtitle": "CODa sequence {seq} · Clearpath Husky robot on a university campus · camera: YOLO11x · tracks: factor-tracker",
         "attribution": "CODa (UT Campus Object Dataset): Zhang et al., CC BY-NC-SA 4.0",
         "lidar_name": "Ouster OS1-128",
         "ego_name": "robot",

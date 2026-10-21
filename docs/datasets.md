@@ -108,7 +108,7 @@ line (score 1.0) or a full 16-field detection line (score last).
 ## Commands
 
 ```sh
-cargo run -p perception-cli -- prepare \
+cargo run -p factor-tracker -- prepare \
     --calib sequence/calib.txt \
     --times sequence/times.txt \
     --poses sequence/poses.txt \
@@ -119,14 +119,14 @@ cargo run -p perception-cli -- prepare \
     --out-inputs cam-demo-out/inputs.jsonl \
     --out-truth cam-demo-out/truth.jsonl
 
-cargo run -p perception-cli -- replay --setup cam-demo-out/setup.json \
+cargo run -p factor-tracker -- replay --setup cam-demo-out/setup.json \
     --inputs cam-demo-out/inputs.jsonl --mode camera_assisted \
     --output cam-demo-out/outputs.jsonl --diagnostics cam-demo-out/diagnostics.json
 
-cargo run -p perception-cli -- evaluate --output cam-demo-out/outputs.jsonl \
+cargo run -p factor-tracker -- evaluate --output cam-demo-out/outputs.jsonl \
     --truth cam-demo-out/truth.jsonl --metrics cam-demo-out/metrics.json
 
-cargo run -p perception-cli -- report --setup cam-demo-out/setup.json \
+cargo run -p factor-tracker -- report --setup cam-demo-out/setup.json \
     --output cam-demo-out/outputs.jsonl --truth cam-demo-out/truth.jsonl \
     --metrics cam-demo-out/metrics.json --html cam-demo-out/report.html
 ```
