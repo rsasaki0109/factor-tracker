@@ -58,7 +58,8 @@ def main() -> None:
             print(f"sequence {seq}: index not readable ({error}), skipped", flush=True)
             continue
         pattern = re.compile(rf"3d_bbox/os1/{seq}/3d_bbox_os1_{seq}_(\d+)\.json$")
-        labelled = sorted(int(m.group(1)) for name in index if (m := pattern.match(name)))
+        matches = (pattern.match(name) for name in index)
+        labelled = sorted(int(m.group(1)) for m in matches if m)
         frames = [f for f in labelled[::args.stride] if not excluded(seq, f, args.margin)]
         frames = [f for f in frames if f"3d_comp/os1/{seq}/3d_comp_os1_{seq}_{f}.bin" in index]
         print(f"sequence {seq}: {len(labelled)} labelled scans, {len(frames)} chosen", flush=True)
