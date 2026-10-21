@@ -68,6 +68,37 @@ Measured on an A40: 0.33 s per iteration at batch 4 (2.4 GB of GPU memory),
 11.5 min per epoch of 8513 scans, so 20 epochs take about 3.8 h; the whole run
 is about 4.5 h, about $2.7 at $0.59/h.
 
+### Result of the first run: not better than the published detector
+
+Trained from scratch on 8513 scans (every third labelled scan, Pedestrian
+only, evaluation windows +-100 scans left out), 20 epochs, final loss 1.8.
+Tracking (`coda_tracker_eval.sh`, engine with distance association; the
+score threshold is chosen on dev):
+
+| detections | dev HOTA (best threshold) | held-out HOTA (same threshold) |
+| --- | --- | --- |
+| published, CPU first stage (baseline) | 0.614 (0.4) | 0.710 |
+| published, two-stage on GPU (point shift fixed) | 0.614 (0.5) | 0.699 |
+| new, trained here | 0.547 (0.4) | 0.711 |
+
+Pedestrian detection on the scans of CODa's own *testing* split inside the
+windows (scans no model was trained on), score >= 0.4:
+
+| detections | dev recall / precision | held-out recall / precision |
+| --- | --- | --- |
+| published, CPU first stage | 0.804 / 0.816 | 0.892 / 0.915 |
+| new | 0.721 / 0.783 | 0.863 / 0.852 |
+
+The published model scores the same on CODa's training-split and
+testing-split scans of these windows, so its having seen most of them
+inflates its numbers little. The new model is genuinely weaker, mostly in
+the crowded dev windows (recall 0.72 against 0.80). It ties on held-out
+tracking only. The published model was fine-tuned from a Waymo-trained
+model on all of CODa (every labelled scan, all classes, 30 epochs). Ways
+to close the gap: every labelled scan instead of every third (about 3x the
+data and cost), more epochs, or fine-tuning from the published weights
+(faster, but the evaluation scans are then no longer unseen).
+
 ## The evaluation windows (keep them out of training)
 
 | split | sequence | scans |

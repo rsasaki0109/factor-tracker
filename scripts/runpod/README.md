@@ -138,6 +138,13 @@ Tracking on the same two windows, same conversion and flags
 | two-stage, score >= 0.4 | 0.530 / 0.647 | 0.549 / 0.656 |
 | two-stage, score >= 0.5 | 0.526 / 0.646 | 0.544 / 0.651 |
 
+Correction (October 2026): `detect_coda_pvrcnn.py` did not lift the points by
+the model's `SHIFT_COOR` (0.8 m), so the runs below saw points 0.8 m too low.
+With the shift applied, over all eight evaluation windows, the two-stage
+output tracks at dev HOTA 0.614 (score >= 0.5) and held-out 0.699, against
+0.614 / 0.710 for the CPU first stage (`docs/detector_training.md`): the
+conclusion stands. The numbers below are from before the fix.
+
 The refinement moves boxes about 1 cm closer but loses recall, so tracking is
 slightly worse at every threshold. Rescoring the first-stage RoIs with the
 second-stage score raises RoI-level average precision only a little (0.780
