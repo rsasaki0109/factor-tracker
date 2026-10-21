@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-r"""Full two-stage CODa PV-RCNN on a GPU (upstream OpenPCDet).
+r"""CODa LiDAR detector inference on a GPU with OpenPCDet.
+
+Runs any OpenPCDet config and checkpoint over CODa scans; by default the
+published two-stage CODa PV-RCNN.
 
 The CPU detector (scripts/coda/detect_lidar_cpu.py) runs only the first stage
 of the published CODa checkpoint. This runs the whole model: VoxelBackBone8x
@@ -35,7 +38,7 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "coda"))
 
-from detect_lidar_cpu import CLASS_NAMES, TO_CODA  # noqa: E402
+from detect_lidar_cpu import TO_CODA  # noqa: E402
 
 # pcdet.datasets imports every dataset module; the Argoverse 2 one needs av2
 # and TorchScript-compiles kornia code at import time, which breaks across
@@ -57,6 +60,8 @@ class Scans(DatasetTemplate):
         super().__init__(dataset_cfg=dataset_cfg, class_names=class_names, training=False, root_path=None,
                          logger=logger)
         self.scans = scans
+        # The CODa models were trained on points lifted by SHIFT_COOR (0.8 m).
+        self.shift = np.array(dataset_cfg.get("SHIFT_COOR", [0.0, 0.0, 0.0]), dtype=np.float32)
 
     def __len__(self):
         return len(self.scans)
@@ -64,6 +69,7 @@ class Scans(DatasetTemplate):
     def __getitem__(self, index):
         points = np.fromfile(self.scans[index], dtype=np.float32).reshape(-1, 4)
         points = points[np.isfinite(points).all(axis=1)]
+        points[:, :3] += self.shift
         return self.prepare_data(data_dict={"points": points, "frame_id": index})
 
 
@@ -82,12 +88,15 @@ def main() -> None:
     args = parser.parse_args()
 
     cfg_from_yaml_file(args.cfg, cfg)
-    overrides = [("MODEL.ROI_HEAD.NMS_CONFIG.TEST.NMS_PRE_MAXSIZE", "4096"),
-                 ("MODEL.ROI_HEAD.NMS_CONFIG.TEST.NMS_POST_MAXSIZE", "500")] + [tuple(kv) for kv in args.set]
-    cfg_from_list([x for kv in overrides for x in kv], cfg)
+    overrides = [tuple(kv) for kv in args.set]
+    if "ROI_HEAD" in cfg.MODEL:
+        overrides = [("MODEL.ROI_HEAD.NMS_CONFIG.TEST.NMS_PRE_MAXSIZE", "4096"),
+                     ("MODEL.ROI_HEAD.NMS_CONFIG.TEST.NMS_POST_MAXSIZE", "500")] + overrides
+    if overrides:
+        cfg_from_list([x for kv in overrides for x in kv], cfg)
     logger_note = ", ".join(f"{k}={v}" for k, v in overrides)
-    if list(cfg.CLASS_NAMES) != CLASS_NAMES:
-        raise SystemExit("config class list differs from detect_lidar_cpu.CLASS_NAMES")
+    class_names = list(cfg.CLASS_NAMES)
+    shift = np.array(cfg.DATA_CONFIG.get("SHIFT_COOR", [0.0, 0.0, 0.0]))
     logger = common_utils.create_logger()
     logger.info(f"config overrides: {logger_note}")
     model = None
@@ -114,17 +123,20 @@ def main() -> None:
                 labels = pred[0]["pred_labels"].cpu().numpy()
                 records = []
                 for box, score, label in zip(boxes, scores, labels):
-                    name = CLASS_NAMES[int(label) - 1]
+                    name = class_names[int(label) - 1]
                     records.append({
                         "classId": TO_CODA.get(name, name), "modelClass": name, "score": round(float(score), 4),
-                        "cX": float(box[0]), "cY": float(box[1]), "cZ": float(box[2]),
+                        "cX": float(box[0] - shift[0]), "cY": float(box[1] - shift[1]),
+                        "cZ": float(box[2] - shift[2]),
                         "l": float(box[3]), "w": float(box[4]), "h": float(box[5]), "r": 0.0, "p": 0.0,
                         "y": float(box[6]),
                     })
                 (out / f"3d_bbox_os1_{seq}_{frame}.json").write_text(json.dumps({"3dbbox": records}))
-                # Intermediate results for diagnosis: first-stage RoIs with their
-                # scores and labels, and the second stage's score and refined box
-                # for each RoI (before the final threshold and NMS).
+                # Intermediate results for diagnosis (two-stage models): first-stage
+                # RoIs with their scores and labels, and the second stage's score
+                # and refined box for each RoI (before the final threshold and NMS).
+                if "rois" not in batch:
+                    continue
                 rois = batch["rois"][0].cpu().numpy()
                 keep = rois[:, 3:6].sum(axis=1) > 0
                 second = torch.sigmoid(batch["batch_cls_preds"][0]).reshape(-1).cpu().numpy()

@@ -3,9 +3,7 @@
 # published (pcdet 0.5 fork) on PyTorch 1.10 + CUDA 11.3, for comparison with
 # coda_pvrcnn.sh (upstream OpenPCDet). Same detector script and outputs.
 #
-# Pod image: pytorch/pytorch:1.10.0-cuda11.3-cudnn8-devel; an Ampere GPU
-# (sm_86: RTX A4000/A5000/3090/A6000, A40). No apt (the image's NVIDIA apt
-# keys are stale): downloads use Python.
+# Pod image and GPU: see setup_coda_models.sh.
 set -euo pipefail
 
 repo=$(cd "$(dirname "$0")/../.." && pwd)
@@ -14,23 +12,8 @@ CODA=$WORK/CODa
 CKPT=$WORK/coda128_allclass_bestoracle.pth
 CFG=cfgs/da-coda-coda_models/waymocenterhead/pvrcnn_allclass128full_finetune_headfull.yaml
 WINDOWS=${WINDOWS:-"20:8640 13:9700"}
-export TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST:-8.6}
 
-python - "$WORK" "$CKPT" <<'PY'
-import io, sys, tarfile, urllib.request
-from pathlib import Path
-work, ckpt = Path(sys.argv[1]), Path(sys.argv[2])
-if not (work / "coda-models").exists():
-    data = urllib.request.urlopen("https://codeload.github.com/ut-amrl/coda-models/tar.gz/c9a12d740e55c8794da32d71e8cf30af8cefcff8").read()
-    tarfile.open(fileobj=io.BytesIO(data)).extractall(work)
-    next(work.glob("coda-models-*")).rename(work / "coda-models")
-if not ckpt.exists():
-    urllib.request.urlretrieve("https://web.corral.tacc.utexas.edu/texasrobotics/web_CODa/pretrained_models/128channel/"
-                               "coda128_allclass_bestoracle.pth", ckpt)
-PY
-pip install -q "numpy<1.22" numba easydict pyyaml scikit-image tqdm tensorboardX spconv-cu113 shapely scipy pyquaternion
-(cd "$WORK/coda-models" && python setup.py develop > "$WORK/build.log" 2>&1) || { tail -40 "$WORK/build.log"; exit 1; }
-python -c "import pcdet, spconv, torch; print('pcdet', pcdet.__file__, 'torch', torch.__version__, torch.version.cuda)"
+WORK=$WORK bash "$repo/scripts/runpod/setup_coda_models.sh"
 
 for w in $WINDOWS; do
   seq=${w%%:*}; first=${w#*:}; last=$((first + 159))
