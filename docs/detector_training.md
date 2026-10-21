@@ -103,8 +103,18 @@ instead of +-75.2 m, so it is faster for the same accuracy.
 the model is recognised from the number of classes): about 1.5 s per scan
 on one core against 2.5 s for the published model, with boxes within 5 mm
 and scores within 0.007 of OpenPCDet on the GPU and the same tracking scores
-on all eight windows. The checkpoint is not in the repository; rebuild it
-with `INIT=published` (about $2, 2.5 h on an A40). Total pod cost of both runs
+on all eight windows. The checkpoint (CC BY-NC-SA 4.0, as CODa) is on
+Hugging Face, with a model card:
+
+```sh
+wget https://huggingface.co/rsasaki0109/coda-ped-centerpoint/resolve/main/coda_ped_centerpoint_ft.pth
+# sha256 8fe8ac00fcde6c28165834b0a4a919f53683ed8911e91ae2e1bd2e912072463b
+python3 scripts/coda/detect_lidar_cpu.py --ckpt coda_ped_centerpoint_ft.pth \
+    --coda-root CODa --sequence 3 --first 1800 --last 1959 --out det/coda3_1800
+```
+
+To rebuild it, run `coda_train_ped.sh` with `INIT=published`, `EPOCHS=6` and
+`LR=0.001` (about $2, 2.5 h on an A40). Total pod cost of both runs
 with their smoke tests: about $4.7.
 
 Pedestrian detection on the scans of CODa's own *testing* split inside the

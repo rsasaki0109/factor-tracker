@@ -8,7 +8,8 @@ in https://github.com/ut-amrl/coda-models) without CUDA, spconv or OpenPCDet.
 It also runs the pedestrian-only CenterPoint trained by
 `scripts/runpod/train_coda_ped.py` (`scripts/runpod/cfgs/coda_ped_centerpoint.yaml`:
 same network, one class, +-51.2 m instead of +-75.2 m, about twice as fast);
-the model is recognised from the checkpoint's number of classes.
+the model is recognised from the checkpoint's number of classes. Its weights:
+https://huggingface.co/rsasaki0109/coda-ped-centerpoint (CC BY-NC-SA 4.0).
 
     points -> mean voxel features -> VoxelBackBone8x (sparse 3D conv)
            -> height compression -> BaseBEVBackbone -> CenterHead -> boxes
