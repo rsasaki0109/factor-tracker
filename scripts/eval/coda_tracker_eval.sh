@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# Scores a CODa LiDAR detector by the tracking it gives: converts its
-# detections for the eight CODa evaluation windows (five development windows,
-# three held-out), runs the engine and an AB3DMOT-style baseline on them and
-# prints mean HOTA / DetA / AssA / MOTA / IDF1 per split, plus pedestrian
-# detection recall and precision.
+# Scores a CODa LiDAR detector by the pedestrian tracking it gives: converts
+# its detections for the eight CODa evaluation windows (five development
+# windows, three held-out), keeps pedestrians only (detections and truth),
+# runs the engine and an AB3DMOT-style baseline on them and prints mean
+# HOTA / DetA / AssA / MOTA / IDF1 per split, plus pedestrian detection
+# recall and precision.
 #
 # usage: scripts/eval/coda_tracker_eval.sh <detections-root> <coda-root> [score-threshold] [work-dir]
 #   detections-root  one directory per window, coda<seq>_<first>/, holding
@@ -41,6 +42,22 @@ for split in dev heldout; do
     [[ -d $dets/$name ]] || { echo "missing $dets/$name" >&2; exit 1; }
     python3 "$repo/scripts/coda/convert_coda.py" --coda-root "$coda" --sequence "$seq" --first "$first" --last "$last" \
       --lidar-detections "$dets/$name" --lidar-score-threshold "$th" --out "$d" > "$work/$name.convert.log"
+    # Pedestrians only, in the detections and in the truth (convert_coda.py
+    # keeps every CODa dynamic class; a detector that also reports e.g.
+    # scooters would otherwise be scored against pedestrian-only ones unfairly).
+    "$PY" - "$d" <<'PY'
+import json, sys
+from pathlib import Path
+d = Path(sys.argv[1])
+for name, key in (("inputs.jsonl", "detections"), ("truth.jsonl", "objects")):
+    lines = []
+    for line in (d / name).read_text().splitlines():
+        r = json.loads(line)
+        if key in r:
+            r[key] = [o for o in r[key] if o.get("class") == 2]
+        lines.append(json.dumps(r))
+    (d / name).write_text("\n".join(lines) + "\n")
+PY
     for config in "${!CONFIGS[@]}"; do
       $cli replay --setup "$d/setup.json" --inputs "$d/inputs.jsonl" --mode lidar_only --output "$d/$config.jsonl" \
         --diagnostics /dev/null ${CONFIGS[$config]} > /dev/null
