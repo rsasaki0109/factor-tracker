@@ -11,13 +11,13 @@ each group.
 - Radar measurement models for range / bearing / Doppler.
 - Sensor-specific observation models beyond Cartesian position and image
   bounding boxes.
-- Detector (next step): detections now limit the CODa scores more than
-  association does. The published CODa PV-RCNN second stage, run in its
-  original environment, tracks slightly worse than the CPU first stage
-  (`scripts/runpod/README.md`), so the next step is training a pedestrian
-  detector on CODa on a rented GPU (estimated $10-30) and re-scoring the
-  trackers on the same dev and held-out windows (handoff and evaluation
-  recipe: `docs/detector_training.md`, `scripts/eval/coda_tracker_eval.sh`).
+- Detector: detections limit the CODa scores more than association does.
+  Neither the published CODa PV-RCNN's second stage nor a pedestrian
+  detector trained on RunPod (from scratch, or fine-tuned from the published
+  first stage) beats the published first stage on pedestrian tracking; the
+  fine-tuned one ties (`docs/detector_training.md`). Next: train on every
+  labelled scan for longer, or ship the fine-tuned pedestrian-only model in
+  the CPU detector for speed (+-51.2 m instead of +-75.2 m).
 
 ## Filtering and fusion
 

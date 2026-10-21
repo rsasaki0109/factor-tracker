@@ -29,15 +29,22 @@ cargo build --release -p factor-tracker
 PY=python3 scripts/eval/coda_tracker_eval.sh <detections-root> <coda-root> 0.4 <work-dir>
 ```
 
-It prints, per split, the engine with distance association, the engine with
-the older Mahalanobis association, an AB3DMOT-style baseline, and pedestrian
-detection recall / precision. With the current detector (CPU first stage of
+It scores pedestrians only (detections and truth) and prints, per split, the
+engine with distance association, the engine with the older Mahalanobis
+association, an AB3DMOT-style baseline, and pedestrian detection recall /
+precision. With the current detector (CPU first stage of
 `coda128_allclass_bestoracle.pth`, score >= 0.4) it prints:
 
 | split | engine (distance) HOTA / IDF1 | AB3DMOT-style HOTA / IDF1 | recall / precision (score >= 0.4) |
 | --- | --- | --- | --- |
-| dev (5 windows) | 0.614 / 0.754 | 0.614 / 0.741 | 0.801 / 0.804 |
-| held-out (3 windows) | 0.710 / 0.827 | 0.705 / 0.806 | 0.890 / 0.916 |
+| dev (5 windows) | 0.618 / 0.760 | 0.618 / 0.764 | 0.801 / 0.804 |
+| held-out (3 windows) | 0.768 / 0.900 | 0.764 / 0.887 | 0.890 / 0.916 |
+
+(Before October 21 the script also kept the other CODa dynamic classes, in
+detections and truth; that cost the published detector, which also reports
+scooters and cyclists, about 0.06 held-out HOTA against a pedestrian-only
+detector. `docs/evaluation.md` compares trackers on those mixed-class inputs,
+which is fair between trackers but not between detectors.)
 
 A new detector is better if it beats the engine row on both splits. Try a
 few score thresholds (third argument) and use the one that is best on dev.
@@ -48,7 +55,7 @@ few score thresholds (third argument) and use the one that is best on dev.
 "cY": .., "cZ": .., "l": .., "w": .., "h": .., "r": 0, "p": 0, "y": ..}, ...]}`
 in the LiDAR (os1) frame, as `scripts/coda/detect_lidar_cpu.py` and
 `scripts/runpod/detect_coda_pvrcnn.py` write it. Only `classId == "Pedestrian"`
-is tracked.
+is scored.
 
 ## Training on RunPod (October 2026)
 
@@ -68,18 +75,32 @@ Measured on an A40: 0.33 s per iteration at batch 4 (2.4 GB of GPU memory),
 11.5 min per epoch of 8513 scans, so 20 epochs take about 3.8 h; the whole run
 is about 4.5 h, about $2.7 at $0.59/h.
 
-### Result of the first run: not better than the published detector
+### Results: no detector beats the published first stage
 
-Trained from scratch on 8513 scans (every third labelled scan, Pedestrian
-only, evaluation windows +-100 scans left out), 20 epochs, final loss 1.8.
-Tracking (`coda_tracker_eval.sh`, engine with distance association; the
-score threshold is chosen on dev):
+Two runs on the same 8513 scans (every third labelled scan, Pedestrian
+only, evaluation windows +-100 scans left out):
 
-| detections | dev HOTA (best threshold) | held-out HOTA (same threshold) |
+- from scratch: 20 epochs, final loss 1.8, about 4.8 h of pod time;
+- fine-tuned from the published first stage (`INIT=published`,
+  `init_from_published.py`; the heatmap keeps the Pedestrian channel):
+  6 epochs at LR 0.001, final loss 1.4, about 2.5 h. The published weights
+  have seen most evaluation scans, so this one is not a clean test.
+
+Pedestrian tracking (`coda_tracker_eval.sh`, engine with distance
+association; score threshold chosen on dev, ties broken by IDF1):
+
+| detections | dev HOTA / IDF1 (threshold) | held-out HOTA / IDF1 (same threshold) |
 | --- | --- | --- |
-| published, CPU first stage (baseline) | 0.614 (0.4) | 0.710 |
-| published, two-stage on GPU (point shift fixed) | 0.614 (0.5) | 0.699 |
-| new, trained here | 0.547 (0.4) | 0.711 |
+| published, CPU first stage (baseline) | 0.618 / 0.761 (0.5) | 0.769 / 0.900 |
+| published, two-stage on GPU (point shift fixed) | 0.618 / 0.761 (0.5) | 0.744 / 0.877 |
+| trained from scratch | 0.551 / 0.670 (0.4) | 0.717 / 0.835 |
+| fine-tuned from the published weights | 0.615 / 0.754 (0.5) | 0.776 / 0.907 |
+
+The fine-tuned model ties with the baseline (-0.003 dev, +0.007 held-out,
+within what separates thresholds); it is pedestrian-only and covers +-51.2 m
+instead of +-75.2 m, so on the CPU it would be faster for the same accuracy,
+but `detect_lidar_cpu.py` does not load it yet. Total pod cost of both runs
+with their smoke tests: about $4.7.
 
 Pedestrian detection on the scans of CODa's own *testing* split inside the
 windows (scans no model was trained on), score >= 0.4:
@@ -87,17 +108,16 @@ windows (scans no model was trained on), score >= 0.4:
 | detections | dev recall / precision | held-out recall / precision |
 | --- | --- | --- |
 | published, CPU first stage | 0.804 / 0.816 | 0.892 / 0.915 |
-| new | 0.721 / 0.783 | 0.863 / 0.852 |
+| trained from scratch | 0.721 / 0.783 | 0.863 / 0.852 |
 
 The published model scores the same on CODa's training-split and
 testing-split scans of these windows, so its having seen most of them
-inflates its numbers little. The new model is genuinely weaker, mostly in
-the crowded dev windows (recall 0.72 against 0.80). It ties on held-out
-tracking only. The published model was fine-tuned from a Waymo-trained
-model on all of CODa (every labelled scan, all classes, 30 epochs). Ways
-to close the gap: every labelled scan instead of every third (about 3x the
-data and cost), more epochs, or fine-tuning from the published weights
-(faster, but the evaluation scans are then no longer unseen).
+inflates its numbers little. The model trained from scratch is genuinely
+weaker, mostly in the crowded dev windows (recall 0.72 against 0.80). The
+published model was fine-tuned from a Waymo-trained model on all of CODa
+(every labelled scan, all classes, 30 epochs). What is left to try: every
+labelled scan instead of every third (about 3x the data and cost) and more
+epochs, from scratch or fine-tuned.
 
 ## The evaluation windows (keep them out of training)
 
