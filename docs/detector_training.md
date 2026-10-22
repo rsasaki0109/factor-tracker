@@ -5,14 +5,13 @@ Status as of October 2026, for whoever picks this up next (on a laptop GPU).
 ## Why
 
 On the CODa evaluation windows the detector, not the tracker, now limits the
-scores (`docs/evaluation.md`, "Standard metrics against baseline trackers";
-measured with the earlier scoring that also kept the other dynamic classes):
+scores (pedestrians only, `scripts/eval/upper_bounds.py`; `docs/evaluation.md`):
 
-| on the same CODa dev windows | HOTA |
-| --- | --- |
-| engine today (CPU first stage, distance association) | 0.615 |
-| perfect association on the same detections | 0.659 |
-| perfect detections (truth boxes as detections) | 0.836 |
+| on the same CODa windows | dev HOTA | held-out HOTA |
+| --- | --- | --- |
+| engine today (CPU first stage, distance association) | 0.618 | 0.768 |
+| perfect association on the same detections | 0.697 | 0.790 |
+| perfect detections (truth boxes as detections) | 0.848 | 0.955 |
 
 Things already tried that did not move it: the published checkpoint's second
 stage (run in its original environment it tracks slightly worse than the
