@@ -20,7 +20,7 @@ filtering and assignment per scan, an optional fixed-lag factor-graph
 re-association (`--fgo-lag`), and LiDAR tracks that camera detections associate
 with and label. It takes detections from any detector and outputs objects with
 stable IDs and uncertainty. The core is CPU-only (no GPU, ROS, Python or OpenCV
-dependency); a ROS 2 node and a browser demo are included.
+dependency); a ROS 2 node and a [browser demo](https://rsasaki0109.github.io/factor-tracker/) are included.
 
 ## Results
 
@@ -59,8 +59,8 @@ cargo run -p factor-tracker -- cam-demo --out-dir cam-out     # camera + LiDAR p
 ```
 
 Rust 1.89 or newer. More: [`docs/usage.md`](docs/usage.md) (CLI, Rust API,
-SDK), [`ros2/`](ros2/factor_tracker_ros) (ROS 2 node), [`web/`](web) (browser
-demo).
+SDK), [`ros2/`](ros2/factor_tracker_ros) (ROS 2 node), [live browser demo](https://rsasaki0109.github.io/factor-tracker/)
+(phone camera, source in [`web/`](web)).
 
 ## Documentation
 
