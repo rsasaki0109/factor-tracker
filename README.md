@@ -24,19 +24,22 @@ dependency); a ROS 2 node and a [browser demo](https://rsasaki0109.github.io/fac
 
 ## Results
 
-Pedestrian tracking on 8 CODa windows, **same detections for every tracker**
-(CODa PV-RCNN on CPU, score >= 0.4):
+Pedestrian tracking on 8 CODa windows, **same detector for every tracker**
+(CODa PV-RCNN first stage on CPU):
 
-| tracker | dev HOTA | dev IDF1 | dev ID switches | held-out HOTA | held-out IDF1 | held-out ID switches |
-| --- | --- | --- | --- | --- | --- | --- |
-| Kalman + Mahalanobis gate | 0.600 | 0.722 | 1151 | 0.745 | 0.888 | 22 |
-| AB3DMOT-style | **0.618** | 0.746 | 987 | 0.764 | 0.882 | 28 |
-| **factor-tracker** | **0.618** | **0.760** | **934** | **0.768** | **0.900** | **18** |
+| tracker | detections (NMS IoU, score) | dev HOTA | dev IDF1 | dev ID switches | held-out HOTA | held-out IDF1 | held-out ID switches |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Kalman + Mahalanobis gate | 0.1, >= 0.4 | 0.600 | 0.722 | 1151 | 0.745 | 0.888 | 22 |
+| AB3DMOT-style | 0.1, >= 0.4 | 0.618 | 0.746 | 987 | 0.764 | 0.882 | 28 |
+| factor-tracker | 0.1, >= 0.4 | 0.618 | 0.760 | 934 | 0.768 | 0.900 | **18** |
+| **factor-tracker** + birth suppression (0.8 m) | 0.3, >= 0.5 | **0.628** | **0.772** | **773** | **0.777** | **0.902** | **18** |
 
-Fewer ID switches in all 8 windows. HOTA ties with AB3DMOT-style because the
-detections are the same. Settings were tuned on dev (5 windows); held-out
-(3 windows) was scored once. The detector was trained on most of these scans,
-so absolute numbers are optimistic for every tracker. Details:
+Each tracker uses the detection setting that is best for it on dev (5
+windows); held-out (3 windows) was scored once. A looser NMS finds more people
+in crowds but also duplicate boxes; factor-tracker absorbs the duplicates by
+not starting tracks next to confirmed ones, AB3DMOT-style cannot (HOTA 0.600
+dev with the same detections). The detector was trained on most of these
+scans, so absolute numbers are optimistic for every tracker. Details:
 [`docs/evaluation.md`](docs/evaluation.md).
 
 ## How it works

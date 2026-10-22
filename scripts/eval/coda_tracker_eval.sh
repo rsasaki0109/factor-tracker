@@ -2,9 +2,10 @@
 # Scores a CODa LiDAR detector by the pedestrian tracking it gives: converts
 # its detections for the eight CODa evaluation windows (five development
 # windows, three held-out), keeps pedestrians only (detections and truth),
-# runs the engine and an AB3DMOT-style baseline on them and prints mean
-# HOTA / DetA / AssA / MOTA / IDF1 per split, plus pedestrian detection
-# recall and precision.
+# runs the engine (also with births suppressed within 0.8 m of a confirmed
+# track, which absorbs duplicate boxes) and an AB3DMOT-style baseline on them
+# and prints mean HOTA / DetA / AssA / MOTA / IDF1 per split, plus pedestrian
+# detection recall and precision.
 #
 # usage: scripts/eval/coda_tracker_eval.sh <detections-root> <coda-root> [score-threshold] [work-dir]
 #   detections-root  one directory per window, coda<seq>_<first>/, holding
@@ -26,6 +27,7 @@ HELDOUT="3:1800:1959 4:6870:7029 9:8515:8674"
 prior="--initial-velocity-variance 1 --accel-spectral-density 0.5 --report-coast-ms 0"
 declare -A CONFIGS=(
   [engine_distance]="$prior --max-association-distance-m 1.0 --recent-track-window-ns 0"
+  [engine_birth]="$prior --max-association-distance-m 1.0 --recent-track-window-ns 0 --min-birth-distance-m 0.8"
   [engine_mahalanobis]="$prior --gate-squared-mahalanobis 5.99"
 )
 mean() { "$PY" -c "
@@ -66,7 +68,7 @@ PY
     "$PY" "$repo/scripts/eval/baselines.py" ab3dmot "$d/engine_mahalanobis.jsonl" "$d/ab3dmot.jsonl" --gate 0.8 --max-age 8 --min-hits 2
     "$PY" "$repo/scripts/eval/mot_metrics.py" "$d/ab3dmot.jsonl" "$d/truth.jsonl" --json >> "$work/$split.ab3dmot.txt"
   done
-  for config in engine_distance engine_mahalanobis ab3dmot; do mean "$config" "$work/$split.$config.txt"; done
+  for config in engine_distance engine_birth engine_mahalanobis ab3dmot; do mean "$config" "$work/$split.$config.txt"; done
   "$PY" "$repo/scripts/eval/coda_detections.py" "$dets" "$coda" $windows
 done
 echo "work dir: $work"

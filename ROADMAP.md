@@ -58,7 +58,9 @@ each group.
   held-out windows). Upper bounds on pedestrians (`scripts/eval/upper_bounds.py`):
   perfect association on the same detections reaches dev HOTA 0.697
   (held-out 0.790), perfect detections 0.848 (0.955), so detection still has
-  three times the headroom of association (`docs/evaluation.md`).
+  three times the headroom of association (`docs/evaluation.md`). A looser
+  detector NMS (IoU 0.3, score >= 0.5) with birth suppression (0.8 m) takes a
+  first step: dev HOTA 0.628, held-out 0.777.
 - Learned or adaptive gating thresholds.
 
 ## Implemented since the initial version
