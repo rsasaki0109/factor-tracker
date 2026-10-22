@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Camera Person Tracking</title>
+<meta name="description" content="Factor Graph Object Tracker in the browser: on-device person detection and tracking from the phone camera.">
+<style>
+  :root {
+    --bg: #f6f7f9; --fg: #16181d; --muted: #5b6270; --card: #ffffff; --line: #d9dde4;
+    --accent: #2563eb; --accent-fg: #ffffff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f1115; --fg: #e8eaee; --muted: #9aa2b1; --card: #181b21; --line: #2a2f38;
+      --accent: #4f8cff; --accent-fg: #0b0d10;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f1115; --fg: #e8eaee; --muted: #9aa2b1; --card: #181b21; --line: #2a2f38;
+    --accent: #4f8cff; --accent-fg: #0b0d10;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, "Hiragino Sans", sans-serif;
+  }
+  main { max-width: 960px; margin: 0 auto; padding: 16px; }
+  h1 { font-size: 1.15rem; margin: 0 0 4px; }
+  p.lead { margin: 0 0 12px; color: var(--muted); font-size: 0.9rem; }
+  .controls { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+  button, label.file {
+    font: inherit; border: 1px solid var(--line); background: var(--card); color: var(--fg);
+    padding: 10px 14px; border-radius: 10px; cursor: pointer; min-height: 44px;
+  }
+  button.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); font-weight: 600; }
+  button:disabled { opacity: 0.5; cursor: default; }
+  label.file input { display: none; }
+  .stage {
+    position: relative; width: 100%; background: #000; border-radius: 12px; overflow: hidden;
+    aspect-ratio: 4 / 3;
+  }
+  .stage video, .stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+  .stage video.mirror { transform: scaleX(-1); }
+  .placeholder[hidden] { display: none; }
+  .placeholder {
+    position: absolute; inset: 0; display: grid; place-items: center; color: #c7ccd6;
+    text-align: center; padding: 16px; font-size: 0.95rem;
+  }
+  .stats {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; margin-top: 12px;
+  }
+  .stat { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; }
+  .stat b { display: block; font-size: 1.1rem; font-variant-numeric: tabular-nums; }
+  .stat span { color: var(--muted); font-size: 0.78rem; }
+  .note { color: var(--muted); font-size: 0.82rem; margin-top: 12px; }
+  .note a { color: var(--accent); }
+  #status { color: var(--muted); font-size: 0.85rem; margin: 0 0 8px; min-height: 1.3em; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Camera person tracking</h1>
+  <p class="lead">The Factor Graph Object Tracker (Rust → WebAssembly) on person detections from the camera. Everything runs on this device; no video leaves it.</p>
+  <div class="controls">
+    <button id="start" class="primary">Start camera</button>
+    <button id="flip" disabled>Switch camera</button>
+    <label class="file">Video file<input id="file" type="file" accept="video/*"></label>
+    <button id="boxes" aria-pressed="false">Show detections</button>
+  </div>
+  <p id="status" role="status">Loading the tracker and the detector…</p>
+  <div class="stage" id="stage">
+    <video id="video" playsinline muted></video>
+    <canvas id="overlay"></canvas>
+    <div class="placeholder" id="placeholder">Press “Start camera” (or pick a video file).</div>
+  </div>
+  <div class="stats">
+    <div class="stat"><b id="s-fps">–</b><span>frames / s</span></div>
+    <div class="stat"><b id="s-det">–</b><span>detector ms</span></div>
+    <div class="stat"><b id="s-trk">–</b><span>tracker ms</span></div>
+    <div class="stat"><b id="s-dets">–</b><span>detections</span></div>
+    <div class="stat"><b id="s-tracks">–</b><span>confirmed people</span></div>
+    <div class="stat"><b id="s-backend">–</b><span>detector backend</span></div>
+  </div>
+  <p class="note">
+    Detector: MediaPipe EfficientDet-Lite0 (COCO “person”), GPU delegate with CPU fallback.
+    Tracker: constant-velocity Kalman filter with IoU association from
+    <a href="https://github.com/rsasaki0109/factor-tracker">factor-tracker</a>.
+    Solid boxes are confirmed tracks, dashed ones are not yet confirmed or briefly lost.
+  </p>
+</main>
+<script type="module" src="app.js"></script>
+</body>
+</html>

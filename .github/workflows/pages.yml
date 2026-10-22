@@ -1,0 +1,46 @@
+name: Pages
+
+# Builds the browser demo (web/ plus crates/factor-tracker-wasm) and publishes it
+# with GitHub Pages. Needs Settings -> Pages -> Source: "GitHub Actions".
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - name: Build the tracker for WebAssembly
+        run: cargo build --release --target wasm32-unknown-unknown -p factor-tracker-wasm
+      - name: Assemble the site
+        run: |
+          mkdir -p site
+          cp web/index.html web/app.js web/tracker.js site/
+          cp target/wasm32-unknown-unknown/release/factor_tracker_wasm.wasm site/
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

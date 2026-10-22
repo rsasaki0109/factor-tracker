@@ -2,12 +2,12 @@
 
 ## Overview
 
-`perception-engine` is a small Cargo workspace with two crates:
+`factor-tracker` is a small Cargo workspace with two crates:
 
-- `perception-core` — the tracking library. It has no file I/O, networking or
+- `factor-tracker-core` — the tracking library. It has no file I/O, networking or
   media dependencies. Its only runtime dependencies are `nalgebra` and
   `thiserror`.
-- `perception-cli` — a thin binary around the library that performs file I/O,
+- `factor-tracker` — a thin binary around the library that performs file I/O,
   synthetic scenario generation and HTML visualization.
 
 The processing pipeline is:
@@ -25,7 +25,7 @@ ObservationBatch (one sensor, one timestamp)
 Ground truth never enters the library. It exists only in the CLI scenario
 generator and the renderer.
 
-## Module map (`perception-core`)
+## Module map (`factor-tracker-core`)
 
 | Module | Responsibility |
 | --- | --- |

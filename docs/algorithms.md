@@ -181,7 +181,7 @@ separated.
 
 ### What is measured
 
-Only `perception-core` tracking is timed. Observation batches are built before
+Only `factor-tracker-core` tracking is timed. Observation batches are built before
 the timed section; no detection, video decoding or other sensor processing is
 included. The reported numbers are therefore **not** an end-to-end FPS figure
 and are not comparable to detector throughput.
@@ -215,7 +215,7 @@ a guarantee, not a product specification, and no comparison to any other
 tracker is implied. Reproduce with:
 
 ```sh
-cargo bench -p perception-core -- --warm-up-time 1 --measurement-time 2 --sample-size 10
+cargo bench -p factor-tracker-core -- --warm-up-time 1 --measurement-time 2 --sample-size 10
 ```
 
 The 3D benchmark is dominated by the `O(N²)` gating/cost construction (a

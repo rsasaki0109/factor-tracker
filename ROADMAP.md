@@ -11,6 +11,13 @@ each group.
 - Radar measurement models for range / bearing / Doppler.
 - Sensor-specific observation models beyond Cartesian position and image
   bounding boxes.
+- Detector: detections limit the CODa scores more than association does.
+  Neither the published CODa PV-RCNN's second stage nor a pedestrian
+  detector trained on RunPod (from scratch, or fine-tuned from the published
+  first stage) beats the published first stage on pedestrian tracking; the
+  fine-tuned one ties (`docs/detector_training.md`) and runs in
+  `detect_lidar_cpu.py` about 1.7x faster (pedestrian-only, +-51.2 m).
+  Next: train on every labelled scan for longer.
 
 ## Filtering and fusion
 
@@ -23,10 +30,47 @@ each group.
 
 ## Association and track management
 
-- Appearance-assisted association (ReID) and feature embeddings.
+- Appearance-assisted association: the cost term and per-track embeddings are
+  implemented, but on CODa (one forward camera) only 13 % of LiDAR detections
+  get an embedding and ID switches do not change (`docs/evaluation.md`).
+  Combined with persistent birth suppression it cuts switches within 8 m of
+  the robot by 21 % (33 % ahead) over five CODa windows with real
+  detections, at no cost with oracle detections. Skipping occluded crops and
+  a geometry-only LiDAR shape descriptor did not help (`docs/evaluation.md`).
+  Mid-360 reflectivity separates people about as well as point-cloud shape
+  and adds little to it (`docs/mid360.md`). A first Mid-360 identity
+  benchmark exists (`benchmarks/grandtour_eth2`, 20 s, AI-annotated). Next: a
+  ReID-trained model, a learned point-cloud descriptor, more (and
+  human-checked) Mid-360 labels, and more windows with a crowded forward zone.
 - Joint probabilistic data association (JPDA) and multiple hypothesis tracking
-  (MHT).
+  (MHT). A fixed-lag re-association by factor-graph cost exists
+  (`--fgo-lag`, -24 % switches within 8 m on CODa at 1 s lag). Scored on
+  held-out CODa windows (JRDB needs an institutional account): on top of the
+  distance association below it no longer raises HOTA; swaps undo as many
+  right assignments as wrong ones. Next: use the observations inside a close
+  encounter better, and combine it with an IMM motion model.
+- Distance association for people (`--max-association-distance-m 1.0
+  --recent-track-window-ns 0`, the ROS 2 node's default) puts the engine level
+  with an AB3DMOT-style tracker on CODa pedestrians (published first-stage
+  detections, score >= 0.4; HOTA 0.618 / 0.618 on dev, 0.768 / 0.764 on
+  held-out windows). With the earlier scoring, which also kept the other
+  dynamic classes, perfect association on the same detections reached dev
+  HOTA 0.659 (engine 0.615) and perfect detections 0.836; not yet re-measured
+  on pedestrians only.
 - Learned or adaptive gating thresholds.
+
+## Implemented since the initial version
+
+- Matching cascade for 3D association (`recent_track_window_ns`).
+- Real-dataset harness for KITTI tracking and CODa (`scripts/kitti`,
+  `scripts/coda`), including CPU inference of the CODa PV-RCNN first stage
+  and of a pedestrian detector fine-tuned from it
+  (https://huggingface.co/rsasaki0109/coda-ped-centerpoint).
+- ROS 2 node (`ros2/factor_tracker_ros`, Jazzy): `vision_msgs/Detection3DArray`
+  in, tracks with covariance out; the tracking runs in `factor-tracker
+  stream` as a child process.
+- WebAssembly build of the 2D tracker (`crates/factor-tracker-wasm`) and a
+  browser camera demo (`web/`).
 
 ## Implemented in the camera-assisted LiDAR SDK
 
@@ -50,10 +94,9 @@ each group.
 - Radar adapters and radar observation models.
 - Camera distortion models other than a rectified pinhole.
 - Non-linear (EKF/UKF) camera updates.
-- ROS 2 adapter.
 - Python bindings.
-- Wasm bindings.
-- More than one dataset.
+- 3D tracking in the browser demo (it tracks camera boxes only).
+- More datasets (KITTI tracking and CODa are supported through scripts).
 
 ## Performance
 
@@ -71,6 +114,7 @@ each group.
 
 ## Explicitly out of scope for now
 
-- Object detection model training or inference.
+- Object detection inside the engine crates: they take detections as input.
+  Detectors live in `scripts/` for evaluation and demos (`docs/detector_training.md`).
 - Monocular depth estimation.
 - Large front-end application frameworks.

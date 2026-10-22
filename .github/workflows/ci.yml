@@ -18,6 +18,10 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - name: Build the browser tracker (WebAssembly)
+        run: |
+          rustup target add wasm32-unknown-unknown
+          cargo build --release --target wasm32-unknown-unknown -p factor-tracker-wasm
       - name: Format check
         run: cargo fmt --all -- --check
       - name: Clippy
@@ -30,16 +34,21 @@ jobs:
         run: cargo bench --workspace --no-run
       - name: Run the library examples
         run: |
-          cargo run -p perception-core --example quickstart
-          cargo run -p perception-core --example two_d_tracking
-          cargo run -p perception-core --example three_d_fusion
+          cargo run -p factor-tracker-core --example quickstart
+          cargo run -p factor-tracker-core --example two_d_tracking
+          cargo run -p factor-tracker-core --example three_d_fusion
       - name: Run the CLI demo
-        run: cargo run -p perception-cli -- demo --out-dir demo-out
+        run: cargo run -p factor-tracker -- demo --out-dir demo-out
+      - name: KITTI script unit tests
+        run: |
+          python3 -m pip install --quiet numpy
+          python3 -m unittest discover -s scripts/kitti -v
+          python3 -m unittest discover -s scripts/coda -v
       - name: Run the camera+LiDAR demo
-        run: cargo run -p perception-cli -- cam-demo --out-dir cam-demo-out
+        run: cargo run -p factor-tracker -- cam-demo --out-dir cam-demo-out
       - name: Run the camera+LiDAR demo with injected faults
         run: |
-          cargo run -p perception-cli -- cam-demo --out-dir cam-demo-out-injected \
+          cargo run -p factor-tracker -- cam-demo --out-dir cam-demo-out-injected \
             --camera-delay-ns 150000000 --reverse-window 3 --duplicate-every 7 \
             --pause-sensor camera --pause-start-ns 1000000000 --pause-end-ns 2000000000
 

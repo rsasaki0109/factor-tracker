@@ -4,3 +4,5 @@
 Cargo.lock.bak
 /cam-demo-out
 /cam-demo-out-injected
+__pycache__/
+/web/factor_tracker_wasm.wasm

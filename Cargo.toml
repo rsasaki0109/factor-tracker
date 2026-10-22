@@ -1,21 +1,26 @@
 [workspace]
 resolver = "2"
-members = ["crates/perception-core", "crates/perception-engine", "crates/perception-cli"]
+members = [
+    "crates/factor-tracker-core",
+    "crates/factor-tracker-engine",
+    "crates/factor-tracker",
+    "crates/factor-tracker-wasm",
+]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.89"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/rsasaki0109/perception-engine"
-homepage = "https://github.com/rsasaki0109/perception-engine"
+repository = "https://github.com/rsasaki0109/factor-tracker"
+homepage = "https://github.com/rsasaki0109/factor-tracker"
 authors = ["rsasaki0109 <rsasaki0109@gmail.com>"]
 keywords = ["tracking", "sensor-fusion", "kalman-filter", "computer-vision", "robotics"]
 categories = ["computer-vision", "science", "algorithms"]
 
 [workspace.dependencies]
-perception-core = { path = "crates/perception-core", version = "0.1.0" }
-perception-engine = { path = "crates/perception-engine", version = "0.1.0" }
+factor-tracker-core = { path = "crates/factor-tracker-core", version = "0.1.0" }
+factor-tracker-engine = { path = "crates/factor-tracker-engine", version = "0.1.0" }
 nalgebra = { version = "0.35.0", default-features = false, features = ["std"] }
 thiserror = "2.0"
 serde = { version = "1.0", features = ["derive"] }

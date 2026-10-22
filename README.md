@@ -1,24 +1,29 @@
 <p align="center">
-  <img src="assets/hero.svg" alt="perception-engine: 2D bounding-box tracking and 3D multi-sensor fusion, rendered from the synthetic demo" width="100%">
+  <img src="assets/hero.gif" alt="factor-tracker on a Clearpath Husky robot driving through a campus crowd (CODa sequence 20): camera frames with YOLO detections and projected 3D track boxes (left), Ouster OS1-128 scan with pedestrian tracks from a LiDAR detector, trails and uncertainty rings in a bird's-eye view around the robot (right)" width="100%">
 </p>
 
-<h1 align="center">perception-engine</h1>
+<h1 align="center">Factor Graph Object Tracker</h1>
+
+<p align="center"><code>factor-tracker</code></p>
 
 <p align="center">
-  <a href="https://github.com/rsasaki0109/perception-engine/actions/workflows/ci.yml"><img src="https://github.com/rsasaki0109/perception-engine/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/rsasaki0109/factor-tracker/actions/workflows/ci.yml"><img src="https://github.com/rsasaki0109/factor-tracker/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="#license"><img src="https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg" alt="License: MIT OR Apache-2.0"></a>
   <img src="https://img.shields.io/badge/MSRV-1.89-orange.svg" alt="MSRV 1.89">
   <img src="https://img.shields.io/badge/dependencies-nalgebra%20%7C%20thiserror-informational.svg" alt="Dependencies: nalgebra, thiserror">
 </p>
 
-<p align="center"><em>The image above is rendered from the synthetic demo — not real sensor data.</em></p>
+<p align="center"><em>A Clearpath Husky robot driving through a crowd on the UT Austin campus (<a href="https://github.com/ut-amrl/coda-devkit">CODa</a> sequence 20): real camera frames and Ouster OS1-128 scans. LiDAR detections come from the published CODa PV-RCNN checkpoint (first stage, run on CPU by <code>scripts/coda/detect_lidar_cpu.py</code>), camera detections from YOLO11x; boxes, IDs, trails and uncertainty rings are the engine's <code>camera_assisted</code> tracks in the world frame (CODa SLAM poses). Most frames shown are in CODa's training split, so detections are optimistic; tracking numbers are in <a href="docs/evaluation.md"><code>docs/evaluation.md</code></a>. The animation contains CODa data and is licensed under <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/">CC BY-NC-SA 4.0</a> (Zhang et al.), unlike the code. Rendered with <code>scripts/hero/render_hero.py</code>; the synthetic-demo image is <a href="assets/hero.svg"><code>assets/hero.svg</code></a>.</em></p>
 
 ---
 
 Detector-agnostic multi-object tracking and multi-sensor fusion, written in
-Rust.
+Rust. Kalman filtering and assignment per scan, with an optional fixed-lag
+factor-graph re-association that re-decides recent associations
+(`--fgo-lag`, `docs/evaluation.md`). Short name: `factor-tracker` (crates,
+command line tool, ROS 2 package).
 
-`perception-engine` consumes discrete observations produced by external
+`factor-tracker` consumes discrete observations produced by external
 detectors or sensor front-ends and performs prediction, data association, state
 estimation and track lifecycle management. It outputs objects with consistent
 IDs and explicit uncertainty. Sensor fusion is done by updating a **shared
@@ -28,31 +33,43 @@ independent tracker outputs.
 The core is CPU-only and has no GPU, ROS, Python, OpenCV or inference-engine
 dependency. Numeric work uses `f64`.
 
-> All data shipped in this repository is **synthetic**. Nothing here has been
-> validated against real sensors, and no accuracy, speed or benchmark number is
-> claimed beyond what is explicitly stated in `docs/algorithms.md`.
+> All data shipped in this repository is **synthetic**, except the README
+> animation (CODa, see its caption). Real-data results (KITTI tracking with
+> oracle detections; CODa with oracle and with real LiDAR/camera detections)
+> are reported, with their caveats, in `docs/evaluation.md`; no other accuracy,
+> speed or benchmark number is claimed beyond `docs/algorithms.md`.
+
+### Livox Mid-360 + camera on a quadruped
+
+<p align="center">
+  <img src="assets/hero_mid360.gif" alt="factor-tracker on GrandTour ETH-2: ANYmal quadruped with a Livox Mid-360 and a front camera among people in the ETH main hall" width="100%">
+</p>
+
+<p align="center"><em>An ANYmal quadruped in the ETH Zurich main hall (<a href="https://grand-tour.leggedrobotics.com">GrandTour</a> ETH-2, MIT licence): Livox Mid-360 (mounted upside down, three sweeps accumulated) and the Alphasense front camera, undistorted. Mid-360 detections come from the CODa PV-RCNN 32-beam checkpoint run on CPU (trained on an Ouster, not on Mid-360 data), camera detections from YOLO11x; camera frames arrive ~50 ms after the LiDAR and are associated at their own timestamps. No 3D ground truth exists for this recording; see <a href="docs/mid360.md"><code>docs/mid360.md</code></a>.</em></p>
 
 ## What it is
 
-- A small Rust library (`perception-core`) with two concrete trackers:
+- A small Rust library (`factor-tracker-core`) with two concrete trackers:
   - `BBox2DTracker`: axis-aligned 2D bounding boxes on **one** camera image
     plane.
   - `Cartesian3DTracker`: 3D positions in **one** common frame, with
     multi-sensor sequential fusion.
-- A CLI (`perception-cli`) that generates reproducible synthetic scenarios,
+- A CLI (`factor-tracker`) that generates reproducible synthetic scenarios,
   reads/writes JSONL observations and tracks, and writes a self-contained HTML
   visualization.
 
 ## What it is not
 
-- It is **not** a detector: no model training or inference, no raw image,
-  point-cloud or radar-signal processing, no monocular depth.
+- It is **not** a detector: the engine takes detections as input and does no
+  raw image, point-cloud or radar-signal processing and no monocular depth.
+  (The evaluation scripts run a LiDAR detector on CODa; see
+  `docs/detector_training.md`.)
 - It does **not** estimate 3D orientation or extent. `Cartesian3DTracker` is
   position tracking, not full 3D box tracking.
 - There is no appearance/ReID model, no EKF/UKF, no JPDA/MHT, no
   track-to-track fusion, no out-of-sequence measurement handling, no
-  auto-calibration, no ego-motion estimation, no ROS/Python bindings and no GUI
-  framework. See `ROADMAP.md`.
+  auto-calibration, no ego-motion estimation, no Python bindings and no GUI
+  framework (a ROS 2 node is in `ros2/`). See `ROADMAP.md`.
 - It is **not** ByteTrack or DeepSORT. Those systems combine specific detectors,
   appearance models and association strategies. This is a plain linear Kalman
   filter with IoU/Mahalanobis gating and Hungarian assignment, plus lifecycle
@@ -66,6 +83,10 @@ dependency. Numeric work uses `f64`.
 | 3D constant-velocity Kalman tracker (`[x, y, z]` + velocities) | implemented |
 | Linear Kalman filter with Cholesky solves and Joseph-form updates | implemented |
 | Hungarian (Kuhn–Munkres) assignment with explicit unmatched costs | implemented |
+| Matching cascade for 3D association (recently observed tracks first; on in the engine) | implemented |
+| Appearance (ReID) cost in 3D association from per-detection embeddings (off by default) | implemented |
+| Birth suppression next to confirmed tracks, with persistent neighbours still born (`min_birth_distance_m`, `birth_persistence`, off by default) | implemented |
+| Robot-centric evaluation zone (range and bearing around the robot) | implemented |
 | IoU gating (2D) and squared-Mahalanobis gating (3D) | implemented |
 | Class-aware gating (`None` class is compatible with everything) | implemented |
 | Track lifecycle: Tentative → Confirmed → Lost → Deleted, with recovery | implemented |
@@ -83,18 +104,26 @@ Future work is listed in [`ROADMAP.md`](ROADMAP.md).
 ## Layout
 
 ```
-perception-engine/
-  crates/perception-core/    tracking core (types, filter, assignment, lifecycle, trackers)
-  crates/perception-engine/  camera-assisted LiDAR SDK (calibration, projection, async, eval, KITTI)
-  crates/perception-cli/     CLI, JSONL schemas, scenarios, reports
+factor-tracker/
+  crates/factor-tracker-core/    tracking core (types, filter, assignment, lifecycle, trackers)
+  crates/factor-tracker-engine/  camera-assisted LiDAR SDK (calibration, projection, async, eval, KITTI)
+  crates/factor-tracker/     CLI, JSONL schemas, scenarios, reports
+  crates/factor-tracker-wasm/    2D tracker exported to WebAssembly for the browser demo
+  web/                       browser demo: phone camera -> person detector -> tracker (GitHub Pages)
+  scripts/kitti/             KITTI tracking conversion and multi-sequence evaluation (Python + NumPy)
+  scripts/coda/              CODa (robot dataset) frame fetch, CPU LiDAR detector, conversion to engine JSONL
+  scripts/grandtour/         GrandTour (ANYmal + Livox Mid-360 + cameras) conversion to engine JSONL
+  scripts/reid/              appearance embeddings for LiDAR detections from camera crops
+  scripts/eval/              LiDAR/camera agreement for recordings without 3D ground truth
+  scripts/runpod/            GPU detector runs (OpenPCDet, Ultralytics) on a RunPod pod
   docs/                      architecture, data format, algorithms, camera-lidar, datasets, evaluation
   assets/                    demo assets (hero image)
-  .github/workflows/         CI
+  .github/workflows/         CI and the GitHub Pages deployment of web/
 ```
 
 ## Camera-assisted LiDAR tracking (SDK)
 
-`perception-engine` (the crate) turns sensor-native detections, calibration and
+`factor-tracker-engine` (the crate) turns sensor-native detections, calibration and
 timestamps into common-frame 3D tracks plus association diagnostics, for one
 camera and one LiDAR. You do not assemble the pipeline yourself:
 
@@ -102,7 +131,7 @@ camera and one LiDAR. You do not assemble the pipeline yourself:
 sensor detections
     -> bounded arrival-order reorder buffer (event time preserved)
     -> per-observation coordinate normalization (calibration + ego pose at event time)
-    -> LiDAR position tracking (perception-core)
+    -> LiDAR position tracking (factor-tracker-core)
     -> geometric camera association (projected 3D boxes vs 2D detections)
     -> camera class evidence as a soft prior (camera-assisted mode)
     -> unified track output, diagnostics, comparison and HTML report
@@ -117,7 +146,7 @@ position valid indefinitely.
 Run the end-to-end synthetic demo (fixture, three modes, evaluation, report):
 
 ```sh
-cargo run -p perception-cli -- cam-demo --out-dir cam-demo-out
+cargo run -p factor-tracker -- cam-demo --out-dir cam-demo-out
 ```
 
 This writes setup, inputs, truth, `comparison.json` and a local `report.html`.
@@ -132,9 +161,12 @@ expected to improve.
 
 Real KITTI data uses the same `replay`/`evaluate`/`report` path after
 `prepare`; see [`docs/datasets.md`](docs/datasets.md) and
-[`docs/camera-lidar.md`](docs/camera-lidar.md). **No real dataset was downloaded
-in this environment**, so the reported demo numbers come from the synthetic
-fixture only.
+[`docs/camera-lidar.md`](docs/camera-lidar.md). `scripts/kitti/` converts the
+KITTI tracking benchmark and evaluates every sequence; `scripts/coda/` does
+the same for the CODa robot dataset (Clearpath Husky, Ouster OS1-128); `scripts/runpod/` runs
+GPU detectors (OpenPCDet, Ultralytics) on a RunPod pod to produce the
+detections. Real-data numbers are in [`docs/evaluation.md`](docs/evaluation.md);
+the demo numbers come from the synthetic fixture.
 
 ## Requirements
 
@@ -147,7 +179,7 @@ fixture only.
 Generate both synthetic scenarios, track them and write visualizations:
 
 ```sh
-cargo run -p perception-cli -- demo --out-dir demo-out
+cargo run -p factor-tracker -- demo --out-dir demo-out
 ```
 
 Then open `demo-out/demo_2d.html` and `demo-out/demo_3d_fusion.html` in a
@@ -157,18 +189,18 @@ The same steps can be run individually:
 
 ```sh
 # 1. Generate the 2D scenario (observations + ground truth, JSONL)
-cargo run -p perception-cli -- gen2d --out-dir demo-out --seed 42
+cargo run -p factor-tracker -- gen2d --out-dir demo-out --seed 42
 
 # 2. Track it and render
-cargo run -p perception-cli -- track2d \
+cargo run -p factor-tracker -- track2d \
     --input demo-out/observations_2d.jsonl \
     --output demo-out/tracks_2d.jsonl \
     --truth demo-out/ground_truth_2d.jsonl \
     --html demo-out/demo_2d.html
 
 # 3D multi-sensor fusion
-cargo run -p perception-cli -- gen3d --out-dir demo-out --seed 42
-cargo run -p perception-cli -- track3d \
+cargo run -p factor-tracker -- gen3d --out-dir demo-out --seed 42
+cargo run -p factor-tracker -- track3d \
     --input demo-out/observations_3d.jsonl \
     --output demo-out/tracks_3d.jsonl \
     --truth demo-out/ground_truth_3d.jsonl \
@@ -182,7 +214,7 @@ reproducible for a given seed.
 
 ```rust
 use nalgebra::Matrix4;
-use perception_core::*;
+use factor_tracker_core::*;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut tracker = BBox2DTracker::new(BBox2DTrackerConfig::default())?;
@@ -211,9 +243,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 Run the compiled examples:
 
 ```sh
-cargo run -p perception-core --example quickstart
-cargo run -p perception-core --example two_d_tracking
-cargo run -p perception-core --example three_d_fusion
+cargo run -p factor-tracker-core --example quickstart
+cargo run -p factor-tracker-core --example two_d_tracking
+cargo run -p factor-tracker-core --example three_d_fusion
 ```
 
 For 3D fusion, convert each sensor's measurement into the common tracking frame
@@ -221,7 +253,7 @@ first:
 
 ```rust
 use nalgebra::{Matrix3, Vector3};
-use perception_core::RigidTransform3D;
+use factor_tracker_core::RigidTransform3D;
 
 fn to_tracking_frame() -> Result<(), Box<dyn std::error::Error>> {
     let sensor_local_to_world =

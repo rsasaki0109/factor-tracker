@@ -1,0 +1,154 @@
+#!/usr/bin/env python3
+r"""CODa LiDAR detector inference on a GPU with OpenPCDet.
+
+Runs any OpenPCDet config and checkpoint over CODa scans; by default the
+published two-stage CODa PV-RCNN.
+
+The CPU detector (scripts/coda/detect_lidar_cpu.py) runs only the first stage
+of the published CODa checkpoint. This runs the whole model: VoxelBackBone8x
+-> BEV backbone -> CenterHead proposals -> VoxelSetAbstraction keypoints ->
+PV-RCNN RoI refinement and rescoring, with the model config from
+https://github.com/ut-amrl/coda-models and upstream OpenPCDet's (newer PyTorch)
+implementation of the same modules.
+
+Output is the CPU detector's format, one JSON per frame
+(`<out>/<window>/3d_bbox_os1_<seq>_<frame>.json`, CODa boxes plus `score`),
+so scripts/coda/convert_coda.py --lidar-detections reads it unchanged.
+
+Run from coda-models/tools so the config's _BASE_CONFIG_ paths resolve (the
+installed upstream `pcdet` package is the one imported):
+
+    cd /workspace/coda-models/tools
+    python /workspace/factor-tracker/scripts/runpod/detect_coda_pvrcnn.py \
+        --cfg cfgs/da-coda-coda_models/waymocenterhead/pvrcnn_allclass128full_finetune_headfull.yaml \
+        --ckpt /workspace/coda128_allclass_bestoracle.pth --coda-root /workspace/CODa \
+        --out /workspace/coda_pvrcnn --window 20 8640 8799 --window 4 6870 7029
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+import time
+from pathlib import Path
+
+import numpy as np
+import torch
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "coda"))
+
+from detect_lidar_cpu import TO_CODA  # noqa: E402
+
+# pcdet.datasets imports every dataset module; the Argoverse 2 one needs av2
+# and TorchScript-compiles kornia code at import time, which breaks across
+# versions. It is not used here, so replace it with an empty module.
+import types  # noqa: E402
+
+for name in ("pcdet.datasets.argo2", "pcdet.datasets.argo2.argo2_dataset"):
+    sys.modules[name] = types.ModuleType(name)
+sys.modules["pcdet.datasets.argo2.argo2_dataset"].Argo2Dataset = None
+
+from pcdet.config import cfg, cfg_from_list, cfg_from_yaml_file  # noqa: E402
+from pcdet.datasets import DatasetTemplate  # noqa: E402
+from pcdet.models import build_network, load_data_to_gpu  # noqa: E402
+from pcdet.utils import common_utils  # noqa: E402
+
+
+class Scans(DatasetTemplate):
+    def __init__(self, dataset_cfg, class_names, scans, logger):
+        super().__init__(dataset_cfg=dataset_cfg, class_names=class_names, training=False, root_path=None,
+                         logger=logger)
+        self.scans = scans
+        # The CODa models were trained on points lifted by SHIFT_COOR (0.8 m).
+        self.shift = np.array(dataset_cfg.get("SHIFT_COOR", [0.0, 0.0, 0.0]), dtype=np.float32)
+
+    def __len__(self):
+        return len(self.scans)
+
+    def __getitem__(self, index):
+        points = np.fromfile(self.scans[index], dtype=np.float32).reshape(-1, 4)
+        points = points[np.isfinite(points).all(axis=1)]
+        points[:, :3] += self.shift
+        return self.prepare_data(data_dict={"points": points, "frame_id": index})
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--cfg", required=True)
+    parser.add_argument("--ckpt", type=Path, required=True)
+    parser.add_argument("--coda-root", type=Path, required=True)
+    parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--window", nargs=3, action="append", metavar=("SEQ", "FIRST", "LAST"), required=True)
+    parser.add_argument(
+        "--set", nargs=2, action="append", default=[], metavar=("KEY", "VALUE"),
+        help="config override; the default keeps 500 RoIs per scan for the second stage "
+        "(the published config keeps 100, shared by all 56 classes, which drops people in crowds)",
+    )
+    args = parser.parse_args()
+
+    cfg_from_yaml_file(args.cfg, cfg)
+    overrides = [tuple(kv) for kv in args.set]
+    if "ROI_HEAD" in cfg.MODEL:
+        overrides = [("MODEL.ROI_HEAD.NMS_CONFIG.TEST.NMS_PRE_MAXSIZE", "4096"),
+                     ("MODEL.ROI_HEAD.NMS_CONFIG.TEST.NMS_POST_MAXSIZE", "500")] + overrides
+    if overrides:
+        cfg_from_list([x for kv in overrides for x in kv], cfg)
+    logger_note = ", ".join(f"{k}={v}" for k, v in overrides)
+    class_names = list(cfg.CLASS_NAMES)
+    shift = np.array(cfg.DATA_CONFIG.get("SHIFT_COOR", [0.0, 0.0, 0.0]))
+    logger = common_utils.create_logger()
+    logger.info(f"config overrides: {logger_note}")
+    model = None
+    for seq, first, last in args.window:
+        first, last = int(first), int(last)
+        frames = [f for f in range(first, last + 1)
+                  if (args.coda_root / "3d_comp" / "os1" / seq / f"3d_comp_os1_{seq}_{f}.bin").exists()]
+        scans = [args.coda_root / "3d_comp" / "os1" / seq / f"3d_comp_os1_{seq}_{f}.bin" for f in frames]
+        dataset = Scans(cfg.DATA_CONFIG, cfg.CLASS_NAMES, scans, logger)
+        if model is None:
+            model = build_network(model_cfg=cfg.MODEL, num_class=len(cfg.CLASS_NAMES), dataset=dataset)
+            model.load_params_from_file(filename=str(args.ckpt), logger=logger, to_cpu=False)
+            model.cuda().eval()
+        out = args.out / f"coda{seq}_{first}"
+        out.mkdir(parents=True, exist_ok=True)
+        started = time.time()
+        with torch.no_grad():
+            for i, frame in enumerate(frames):
+                batch = dataset.collate_batch([dataset[i]])
+                load_data_to_gpu(batch)
+                pred, _ = model(batch)
+                boxes = pred[0]["pred_boxes"].cpu().numpy()
+                scores = pred[0]["pred_scores"].cpu().numpy()
+                labels = pred[0]["pred_labels"].cpu().numpy()
+                records = []
+                for box, score, label in zip(boxes, scores, labels):
+                    name = class_names[int(label) - 1]
+                    records.append({
+                        "classId": TO_CODA.get(name, name), "modelClass": name, "score": round(float(score), 4),
+                        "cX": float(box[0] - shift[0]), "cY": float(box[1] - shift[1]),
+                        "cZ": float(box[2] - shift[2]),
+                        "l": float(box[3]), "w": float(box[4]), "h": float(box[5]), "r": 0.0, "p": 0.0,
+                        "y": float(box[6]),
+                    })
+                (out / f"3d_bbox_os1_{seq}_{frame}.json").write_text(json.dumps({"3dbbox": records}))
+                # Intermediate results for diagnosis (two-stage models): first-stage
+                # RoIs with their scores and labels, and the second stage's score
+                # and refined box for each RoI (before the final threshold and NMS).
+                if "rois" not in batch:
+                    continue
+                rois = batch["rois"][0].cpu().numpy()
+                keep = rois[:, 3:6].sum(axis=1) > 0
+                second = torch.sigmoid(batch["batch_cls_preds"][0]).reshape(-1).cpu().numpy()
+                refined = batch["batch_box_preds"][0].cpu().numpy()
+                diag = {"roi": np.round(rois[keep], 3).tolist(),
+                        "roi_score": np.round(batch["roi_scores"][0].cpu().numpy()[keep], 4).tolist(),
+                        "roi_label": batch["roi_labels"][0].cpu().numpy()[keep].astype(int).tolist(),
+                        "rcnn_score": np.round(second[keep], 4).tolist(),
+                        "refined": np.round(refined[keep], 3).tolist()}
+                (out / f"rois_{seq}_{frame}.json").write_text(json.dumps(diag))
+        print(f"coda{seq}_{first}: {len(frames)} scans in {time.time() - started:.0f} s -> {out}", flush=True)
+
+
+if __name__ == "__main__":
+    main()
