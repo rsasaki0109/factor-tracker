@@ -20,7 +20,7 @@ filtering and assignment per scan, an optional fixed-lag factor-graph
 re-association (`--fgo-lag`), and LiDAR tracks that camera detections associate
 with and label. It takes detections from any detector and outputs objects with
 stable IDs and uncertainty. The core is CPU-only (no GPU, ROS, Python or OpenCV
-dependency); a ROS 2 node and a browser demo are included.
+dependency); a ROS 2 node and a [browser demo](https://rsasaki0109.github.io/factor-tracker/) are included.
 
 ## Results
 
@@ -38,6 +38,31 @@ detections are the same. Settings were tuned on dev (5 windows); held-out
 (3 windows) was scored once. The detector was trained on most of these scans,
 so absolute numbers are optimistic for every tracker. Details:
 [`docs/evaluation.md`](docs/evaluation.md).
+
+## How it works
+
+Per LiDAR scan (details: [`docs/algorithms.md`](docs/algorithms.md),
+[`docs/camera-lidar.md`](docs/camera-lidar.md)):
+
+```mermaid
+flowchart TD
+  L["LiDAR detections<br/>(any 3D detector)"] --> N["Reorder by event time,<br/>transform to the tracking frame<br/>(calibration + ego pose)"]
+  N --> P["Predict every track<br/>(constant-velocity Kalman, dt from timestamps)"]
+  P --> C["Cost per track × detection:<br/>distance to the prediction, 1 m gate<br/>(or squared Mahalanobis gate)<br/>+ optional class-prior and appearance terms"]
+  C --> H["Hungarian assignment"]
+  H -->|matched| U["Kalman update"]
+  H -->|unmatched detection| B["Birth<br/>(score threshold, optional suppression<br/>next to confirmed tracks)"]
+  H -->|unmatched track| M["Coast on the prediction"]
+  U --> LC
+  B --> LC
+  M --> LC["Lifecycle, time based:<br/>tentative → confirmed → lost → deleted"]
+  LC --> O["Tracks: stable ID, position,<br/>velocity, covariance"]
+  LC -.->|"optional (fgo-lag)"| F["Fixed-lag factor-graph re-association<br/>over the last N scans: swap / merge /<br/>split / drop when the cost drops"]
+  F -.-> O
+  CAM["Camera 2D detections"] --> A["Project track boxes into the image,<br/>match them to 2D detections"]
+  LC --> A
+  A -.->|"class evidence (soft prior)"| C
+```
 
 ## Demos
 
@@ -59,8 +84,8 @@ cargo run -p factor-tracker -- cam-demo --out-dir cam-out     # camera + LiDAR p
 ```
 
 Rust 1.89 or newer. More: [`docs/usage.md`](docs/usage.md) (CLI, Rust API,
-SDK), [`ros2/`](ros2/factor_tracker_ros) (ROS 2 node), [`web/`](web) (browser
-demo).
+SDK), [`ros2/`](ros2/factor_tracker_ros) (ROS 2 node), [live browser demo](https://rsasaki0109.github.io/factor-tracker/)
+(phone camera, source in [`web/`](web)).
 
 ## Documentation
 
