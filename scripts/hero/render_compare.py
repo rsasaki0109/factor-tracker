@@ -18,13 +18,20 @@ usage: render_compare.py <window-dir> <out.gif> --coda-root CODa --sequence 20 \
 Requires NumPy, SciPy, Pillow and ffmpeg.
 
 The README hero (the comparison) was produced with (CODa sequence 20, scans 12700-12860;
-the clearest of the eight evaluation windows, see --footer):
+the clearest of the eight evaluation windows; each tracker at its best setting on dev,
+docs/evaluation.md):
 
-    PY=python3 scripts/eval/coda_tracker_eval.sh det/cpu CODa 0.4 work
-    python3 scripts/hero/render_compare.py work/coda20_12700/20 assets/compare_ab3dmot.gif \
+    # detector without NMS, then NMS IoU 0.1 (AB3DMOT-style) and 0.3 (factor-tracker)
+    python3 scripts/coda/detect_lidar_cpu.py ... --score-threshold 0.1 --nms-threshold 1.0 --out raw/coda20_12700
+    python3 scripts/eval/nms_variants.py raw nms iou0.1 iou0.3
+    PY=python3 scripts/eval/coda_tracker_eval.sh nms/iou0.1 CODa 0.4 work_a
+    PY=python3 scripts/eval/coda_tracker_eval.sh nms/iou0.3 CODa 0.5 work_b
+    cp work_b/coda20_12700/20/engine_birth.jsonl work_a/coda20_12700/20/
+    python3 scripts/hero/render_compare.py work_a/coda20_12700/20 assets/compare_ab3dmot.gif \
         --coda-root CODa --sequence 20 \
-        --left ab3dmot.jsonl "AB3DMOT-style (0.8 m gate, 8 scans)" \
-        --right engine_distance.jsonl "factor-tracker (distance association)"
+        --left ab3dmot.jsonl "AB3DMOT-style (NMS 0.1, score >= 0.4)" \
+        --right engine_birth.jsonl "factor-tracker (NMS 0.3, score >= 0.5, birth suppression)" \
+        --title "Same detector, two trackers: identity switches" --subtitle ... --footer ...
 """
 
 from __future__ import annotations

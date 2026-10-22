@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/compare_ab3dmot.gif" alt="Side-by-side bird's-eye views of the same 16 s of CODa sequence 20: an AB3DMOT-style tracker (left) makes 25 identity switches, factor-tracker with distance association (right) makes 13" width="100%">
+  <img src="assets/compare_ab3dmot.gif" alt="Side-by-side bird's-eye views of the same 16 s of CODa sequence 20: an AB3DMOT-style tracker (left) makes 25 identity switches, factor-tracker (right) makes 7" width="100%">
 </p>
 
 <h1 align="center">Factor Graph Object Tracker</h1>
@@ -13,7 +13,7 @@
   <img src="https://img.shields.io/badge/dependencies-nalgebra%20%7C%20thiserror-informational.svg" alt="Dependencies: nalgebra, thiserror">
 </p>
 
-<p align="center"><em>Same pedestrian detections, two trackers (CODa seq 20, 16 s). Red rings: identity switches against CODa's labels.</em></p>
+<p align="center"><em>Same detector, two trackers, each at its best setting on dev (CODa seq 20, 16 s). Red rings: identity switches against CODa's labels.</em></p>
 
 Detector-agnostic multi-object tracking and sensor fusion in Rust: Kalman
 filtering and assignment per scan, an optional fixed-lag factor-graph

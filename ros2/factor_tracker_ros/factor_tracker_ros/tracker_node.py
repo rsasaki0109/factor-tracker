@@ -47,11 +47,13 @@ class TrackerNode(Node):
         self.tracking_frame = p("tracking_frame", "odom").value
         executable = p("engine_executable", "factor-tracker").value
         mode = p("mode", "lidar_only").value
-        # Pedestrian motion prior and association by distance (docs/evaluation.md).
+        # Pedestrian motion prior, association by distance, and no new track within
+        # 0.8 m of a confirmed one (absorbs duplicate boxes; docs/evaluation.md).
         engine_args = list(p("engine_args", ["--initial-velocity-variance", "1",
                                              "--accel-spectral-density", "0.5",
                                              "--max-association-distance-m", "1.0",
-                                             "--recent-track-window-ns", "0"]).value)
+                                             "--recent-track-window-ns", "0",
+                                             "--min-birth-distance-m", "0.8"]).value)
         fgo_lag = p("fgo_lag", 0).value
         if fgo_lag > 0:
             engine_args += ["--fgo-lag", str(fgo_lag)]
