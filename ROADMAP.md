@@ -47,8 +47,10 @@ each group.
   (`--fgo-lag`, -24 % switches within 8 m on CODa at 1 s lag). Scored on
   held-out CODa windows (JRDB needs an institutional account): on top of the
   distance association below it no longer raises HOTA; swaps undo as many
-  right assignments as wrong ones. Next: use the observations inside a close
-  encounter better, and combine it with an IMM motion model.
+  right assignments as wrong ones. Box size and heading as extra cues do not
+  help either: the detector's boxes are least reliable in exactly those close
+  encounters (`docs/evaluation.md`). Next: combine it with an IMM motion model,
+  or better detections in crowds.
 - Distance association for people (`--max-association-distance-m 1.0
   --recent-track-window-ns 0`, the ROS 2 node's default) puts the engine level
   with an AB3DMOT-style tracker on CODa pedestrians (published first-stage

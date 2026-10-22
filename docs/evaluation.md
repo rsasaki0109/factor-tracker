@@ -555,6 +555,33 @@ What this supports:
 - The held-out windows are less crowded (32-58 ID switches in total against
   ~850-1000 on dev), so they separate trackers less.
 
+### FGO and box shape on pedestrian-only scoring (CODa)
+
+Re-measured with `scripts/eval/coda_tracker_eval.sh` (pedestrians only, same
+detections; engine with distance association):
+
+| setting | dev HOTA / IDF1 / ID switches | held-out HOTA / IDF1 / ID switches |
+| --- | --- | --- |
+| engine | 0.618 / 0.760 / 934 | 0.768 / 0.900 / 18 |
+| + FGO, `--fgo-lag 10` | 0.615 / 0.751 / 806 | 0.761 / 0.881 / 20 |
+| + FGO, `--fgo-lag 20` | 0.615 / 0.750 / 814 | 0.761 / 0.881 / 20 |
+| + box size as an appearance cue, weight 0.5 (best on dev) | 0.619 / 0.760 / 928 | 0.768 / 0.900 / 20 |
+
+- FGO cuts dev switches by 14 % but lowers IDF1: its swaps undo about as many
+  right identities as wrong ones. Replacing the Kalman filter by a factor graph
+  would not change the filtered positions: for this linear-Gaussian model the
+  latest state of the factor graph equals the Kalman estimate (FGO already
+  computes its trajectory cost that way).
+- Box size and heading barely separate neighbours where position does not.
+  Over the eight windows, with a person's last five boxes as template and a
+  neighbour within 1.5 m (`scripts/eval/shape_cue.py`): position picks the right
+  detection 98.8 % of the time; in the 363 cases where it does not, size is
+  right 57 % and heading 51 % (chance). In close encounters the detector's
+  boxes merge or split, so their size is unreliable exactly when it would be
+  needed. As an association cue (size standardized, cosine appearance cost)
+  it changes nothing beyond noise; larger weights make it worse (dev HOTA
+  0.617 at weight 2, 0.595 at 4).
+
 ## Reproducing
 
 ```sh
