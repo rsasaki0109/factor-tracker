@@ -13,7 +13,7 @@ Inputs:
 usage: render_hero.py <results/<seq>> <out.gif> --dataset kitti|coda --data-root <root> --start N --frames 100
 Requires NumPy, Pillow and ffmpeg.
 
-The README hero (CODa, robot) was produced with:
+The README's CODa robot animation was produced with:
 
     python3 scripts/coda/fetch_coda.py --coda-root CODa --sequence 20 --first 8640 --last 8800
     python3 scripts/runpod/detect_camera_yolo.py --image-dir CODa/2d_rect/cam0/20 --out-dir det/coda20

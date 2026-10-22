@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/hero.gif" alt="factor-tracker on a Clearpath Husky robot driving through a campus crowd (CODa sequence 20): camera frames with YOLO detections and projected 3D track boxes (left), Ouster OS1-128 scan with pedestrian tracks from a LiDAR detector, trails and uncertainty rings in a bird's-eye view around the robot (right)" width="100%">
+  <img src="assets/compare_ab3dmot.gif" alt="Side-by-side bird's-eye views of the same 16 s of CODa sequence 20: an AB3DMOT-style tracker (left) makes 25 identity switches, factor-tracker with distance association (right) makes 13" width="100%">
 </p>
 
 <h1 align="center">Factor Graph Object Tracker</h1>
@@ -13,7 +13,7 @@
   <img src="https://img.shields.io/badge/dependencies-nalgebra%20%7C%20thiserror-informational.svg" alt="Dependencies: nalgebra, thiserror">
 </p>
 
-<p align="center"><em>A Clearpath Husky robot driving through a crowd on the UT Austin campus (<a href="https://github.com/ut-amrl/coda-devkit">CODa</a> sequence 20): real camera frames and Ouster OS1-128 scans. LiDAR detections come from the published CODa PV-RCNN checkpoint (first stage, run on CPU by <code>scripts/coda/detect_lidar_cpu.py</code>), camera detections from YOLO11x; boxes, IDs, trails and uncertainty rings are the engine's <code>camera_assisted</code> tracks in the world frame (CODa SLAM poses). Most frames shown are in CODa's training split, so detections are optimistic; tracking numbers are in <a href="docs/evaluation.md"><code>docs/evaluation.md</code></a>. The animation contains CODa data and is licensed under <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/">CC BY-NC-SA 4.0</a> (Zhang et al.), unlike the code. Rendered with <code>scripts/hero/render_hero.py</code>; the synthetic-demo image is <a href="assets/hero.svg"><code>assets/hero.svg</code></a>.</em></p>
+<p align="center"><em>The same pedestrian detections (CODa PV-RCNN first stage on CPU, score &gt;= 0.4) tracked by an AB3DMOT-style tracker (<code>scripts/eval/baselines.py</code>, settings tuned on the development windows) and by factor-tracker with distance association (<code>--max-association-distance-m 1.0</code>). Red rings mark identity switches against CODa's labels, counted as in <code>scripts/eval/mot_metrics.py</code>. Over all eight evaluation windows factor-tracker makes fewer switches in every window (1015 -&gt; 952 in total) and has higher IDF1 (0.746 -&gt; 0.760 dev, 0.882 -&gt; 0.900 held-out); HOTA is tied (0.618 / 0.618 dev, 0.764 / 0.768 held-out), because both trackers see the same detections. The window shown is the clearest of the eight (25 -&gt; 13). Contains CODa data (CC BY-NC-SA 4.0). Rendered with <code>scripts/hero/render_compare.py</code>.</em></p>
 
 ---
 
@@ -39,6 +39,14 @@ dependency. Numeric work uses `f64`.
 > are reported, with their caveats, in `docs/evaluation.md`; no other accuracy,
 > speed or benchmark number is claimed beyond `docs/algorithms.md`.
 
+### Camera + LiDAR on a wheeled robot
+
+<p align="center">
+  <img src="assets/hero.gif" alt="factor-tracker on a Clearpath Husky robot driving through a campus crowd (CODa sequence 20): camera frames with YOLO detections and projected 3D track boxes (left), Ouster OS1-128 scan with pedestrian tracks from a LiDAR detector, trails and uncertainty rings in a bird's-eye view around the robot (right)" width="100%">
+</p>
+
+<p align="center"><em>A Clearpath Husky robot driving through a crowd on the UT Austin campus (<a href="https://github.com/ut-amrl/coda-devkit">CODa</a> sequence 20): real camera frames and Ouster OS1-128 scans. LiDAR detections come from the published CODa PV-RCNN checkpoint (first stage, run on CPU by <code>scripts/coda/detect_lidar_cpu.py</code>), camera detections from YOLO11x; boxes, IDs, trails and uncertainty rings are the engine's <code>camera_assisted</code> tracks in the world frame (CODa SLAM poses). Most frames shown are in CODa's training split, so detections are optimistic; tracking numbers are in <a href="docs/evaluation.md"><code>docs/evaluation.md</code></a>. The animation contains CODa data and is licensed under <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/">CC BY-NC-SA 4.0</a> (Zhang et al.), unlike the code. Rendered with <code>scripts/hero/render_hero.py</code>; the synthetic-demo image is <a href="assets/hero.svg"><code>assets/hero.svg</code></a>.</em></p>
+
 ### Livox Mid-360 + camera on a quadruped
 
 <p align="center">
@@ -46,14 +54,6 @@ dependency. Numeric work uses `f64`.
 </p>
 
 <p align="center"><em>An ANYmal quadruped in the ETH Zurich main hall (<a href="https://grand-tour.leggedrobotics.com">GrandTour</a> ETH-2, MIT licence): Livox Mid-360 (mounted upside down, three sweeps accumulated) and the Alphasense front camera, undistorted. Mid-360 detections come from the CODa PV-RCNN 32-beam checkpoint run on CPU (trained on an Ouster, not on Mid-360 data), camera detections from YOLO11x; camera frames arrive ~50 ms after the LiDAR and are associated at their own timestamps. No 3D ground truth exists for this recording; see <a href="docs/mid360.md"><code>docs/mid360.md</code></a>.</em></p>
-
-### Against an AB3DMOT-style tracker, same detections
-
-<p align="center">
-  <img src="assets/compare_ab3dmot.gif" alt="Side-by-side bird's-eye views of the same 16 s of CODa sequence 20: an AB3DMOT-style tracker (left) makes 25 identity switches, factor-tracker with distance association (right) makes 13" width="100%">
-</p>
-
-<p align="center"><em>The same pedestrian detections (CODa PV-RCNN first stage on CPU, score &gt;= 0.4) tracked by an AB3DMOT-style tracker (<code>scripts/eval/baselines.py</code>, settings tuned on the development windows) and by factor-tracker with distance association (<code>--max-association-distance-m 1.0</code>). Red rings mark identity switches against CODa's labels, counted as in <code>scripts/eval/mot_metrics.py</code>. Over all eight evaluation windows factor-tracker makes fewer switches in every window (1015 -&gt; 952 in total) and has higher IDF1 (0.746 -&gt; 0.760 dev, 0.882 -&gt; 0.900 held-out); HOTA is tied (0.618 / 0.618 dev, 0.764 / 0.768 held-out), because both trackers see the same detections. The window shown is the clearest of the eight (25 -&gt; 13). Contains CODa data (CC BY-NC-SA 4.0). Rendered with <code>scripts/hero/render_compare.py</code>.</em></p>
 
 ## What it is
 
