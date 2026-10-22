@@ -155,7 +155,7 @@ cameras at 10 Hz, 3D boxes with instance ids for 50+ classes (mostly
 pedestrians in busy sequences) and globally consistent SLAM poses. It is
 licensed CC BY-NC-SA 4.0 with additional dataset terms (see the devkit's
 `docs/DATA_REPORT.md`); nothing from it is redistributed here except the
-README animation, which carries that licence.
+README animations, which carry that licence.
 
 The per-sequence ZIPs on the TACC server are 40-110 GB, so
 `scripts/coda/fetch_coda.py` extracts a frame range with parallel HTTP range

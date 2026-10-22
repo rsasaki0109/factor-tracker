@@ -137,7 +137,7 @@ sensor failure mode.
 
 ## CLI
 
-All commands are listed in the README. The camera+LiDAR entry point is:
+All commands are listed in `usage.md`. The camera+LiDAR entry point is:
 
 ```sh
 cargo run -p factor-tracker -- cam-demo --out-dir cam-demo-out
