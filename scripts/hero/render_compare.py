@@ -17,7 +17,7 @@ usage: render_compare.py <window-dir> <out.gif> --coda-root CODa --sequence 20 \
            --left ab3dmot.jsonl "AB3DMOT-style" --right engine_distance.jsonl "factor-tracker"
 Requires NumPy, SciPy, Pillow and ffmpeg.
 
-The README comparison was produced with (CODa sequence 20, scans 12700-12860;
+The README hero (the comparison) was produced with (CODa sequence 20, scans 12700-12860;
 the clearest of the eight evaluation windows, see --footer):
 
     PY=python3 scripts/eval/coda_tracker_eval.sh det/cpu CODa 0.4 work
