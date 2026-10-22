@@ -13,7 +13,23 @@
   <img src="https://img.shields.io/badge/dependencies-nalgebra%20%7C%20thiserror-informational.svg" alt="Dependencies: nalgebra, thiserror">
 </p>
 
-<p align="center"><em>The same pedestrian detections (CODa PV-RCNN first stage on CPU, score &gt;= 0.4) tracked by an AB3DMOT-style tracker (<code>scripts/eval/baselines.py</code>, settings tuned on the development windows) and by factor-tracker with distance association (<code>--max-association-distance-m 1.0</code>). Red rings mark identity switches against CODa's labels, counted as in <code>scripts/eval/mot_metrics.py</code>. Over all eight evaluation windows factor-tracker makes fewer switches in every window (1015 -&gt; 952 in total) and has higher IDF1 (0.746 -&gt; 0.760 dev, 0.882 -&gt; 0.900 held-out); HOTA is tied (0.618 / 0.618 dev, 0.764 / 0.768 held-out), because both trackers see the same detections. The window shown is the clearest of the eight (25 -&gt; 13). Contains CODa data (CC BY-NC-SA 4.0). Rendered with <code>scripts/hero/render_compare.py</code>.</em></p>
+<p align="center"><em>The same pedestrian detections (CODa PV-RCNN first stage on CPU, score &gt;= 0.4) tracked by an AB3DMOT-style tracker (<code>scripts/eval/baselines.py</code>, settings tuned on the development windows) and by factor-tracker with distance association (<code>--max-association-distance-m 1.0</code>). Red rings mark identity switches against CODa's labels, counted as in <code>scripts/eval/mot_metrics.py</code>. The window shown is the clearest of the eight evaluation windows (25 -&gt; 13); all eight are in the table below. Contains CODa data (CC BY-NC-SA 4.0). Rendered with <code>scripts/hero/render_compare.py</code>.</em></p>
+
+**Pedestrian tracking on CODa, same detections for every tracker** (CODa PV-RCNN first stage on CPU,
+score >= 0.4; HOTA and IDF1 averaged over windows, ID switches summed):
+
+| tracker | dev HOTA | dev IDF1 | dev ID switches | held-out HOTA | held-out IDF1 | held-out ID switches |
+| --- | --- | --- | --- | --- | --- | --- |
+| Kalman + Mahalanobis gate (factor-tracker's previous default) | 0.600 | 0.722 | 1151 | 0.745 | 0.888 | 22 |
+| AB3DMOT-style (0.8 m gate, 8 scans) | **0.618** | 0.746 | 987 | 0.764 | 0.882 | 28 |
+| **factor-tracker** (distance association) | **0.618** | **0.760** | **934** | **0.768** | **0.900** | **18** |
+
+Dev: five windows (sequences 13 and 20) on which every setting was tuned; held-out: three windows
+(sequences 3, 4 and 9) scored once afterwards. factor-tracker keeps identities better (fewer switches
+in all eight windows, higher IDF1); HOTA, which also weighs detection quality, is tied with
+AB3DMOT-style because the detections are the same. Reproduce with
+`scripts/eval/coda_tracker_eval.sh`; details and caveats in `docs/evaluation.md` and
+`docs/detector_training.md`.
 
 ---
 
