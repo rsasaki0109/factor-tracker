@@ -39,6 +39,31 @@ detections are the same. Settings were tuned on dev (5 windows); held-out
 so absolute numbers are optimistic for every tracker. Details:
 [`docs/evaluation.md`](docs/evaluation.md).
 
+## How it works
+
+Per LiDAR scan (details: [`docs/algorithms.md`](docs/algorithms.md),
+[`docs/camera-lidar.md`](docs/camera-lidar.md)):
+
+```mermaid
+flowchart TD
+  L["LiDAR detections<br/>(any 3D detector)"] --> N["Reorder by event time,<br/>transform to the tracking frame<br/>(calibration + ego pose)"]
+  N --> P["Predict every track<br/>(constant-velocity Kalman, dt from timestamps)"]
+  P --> C["Cost per track × detection:<br/>distance to the prediction, 1 m gate<br/>(or squared Mahalanobis gate)<br/>+ optional class-prior and appearance terms"]
+  C --> H["Hungarian assignment"]
+  H -->|matched| U["Kalman update"]
+  H -->|unmatched detection| B["Birth<br/>(score threshold, optional suppression<br/>next to confirmed tracks)"]
+  H -->|unmatched track| M["Coast on the prediction"]
+  U --> LC
+  B --> LC
+  M --> LC["Lifecycle, time based:<br/>tentative → confirmed → lost → deleted"]
+  LC --> O["Tracks: stable ID, position,<br/>velocity, covariance"]
+  LC -.->|"optional (fgo-lag)"| F["Fixed-lag factor-graph re-association<br/>over the last N scans: swap / merge /<br/>split / drop when the cost drops"]
+  F -.-> O
+  CAM["Camera 2D detections"] --> A["Project track boxes into the image,<br/>match them to 2D detections"]
+  LC --> A
+  A -.->|"class evidence (soft prior)"| C
+```
+
 ## Demos
 
 <p align="center">
