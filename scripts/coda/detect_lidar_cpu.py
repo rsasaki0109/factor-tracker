@@ -314,7 +314,8 @@ def main() -> None:
         "--nms-threshold",
         type=float,
         default=0.1,
-        help="BEV IoU NMS threshold (the config's final NMS_THRESH; the first-stage one is 0.7)",
+        help="BEV IoU NMS threshold (the config's final NMS_THRESH; the first-stage one is 0.7). For pedestrian "
+        "tracking 0.3 with tracker birth suppression scores better (docs/evaluation.md)",
     )
     parser.add_argument("--scan-dir", default="3d_comp", help="3d_comp (ego-compensated) or 3d_raw")
     parser.add_argument("--threads", type=int, default=0)

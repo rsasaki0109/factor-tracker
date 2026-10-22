@@ -55,10 +55,12 @@ each group.
   --recent-track-window-ns 0`, the ROS 2 node's default) puts the engine level
   with an AB3DMOT-style tracker on CODa pedestrians (published first-stage
   detections, score >= 0.4; HOTA 0.618 / 0.618 on dev, 0.768 / 0.764 on
-  held-out windows). With the earlier scoring, which also kept the other
-  dynamic classes, perfect association on the same detections reached dev
-  HOTA 0.659 (engine 0.615) and perfect detections 0.836; not yet re-measured
-  on pedestrians only.
+  held-out windows). Upper bounds on pedestrians (`scripts/eval/upper_bounds.py`):
+  perfect association on the same detections reaches dev HOTA 0.697
+  (held-out 0.790), perfect detections 0.848 (0.955), so detection still has
+  three times the headroom of association (`docs/evaluation.md`). A looser
+  detector NMS (IoU 0.3, score >= 0.5) with birth suppression (0.8 m) takes a
+  first step: dev HOTA 0.628, held-out 0.777.
 - Learned or adaptive gating thresholds.
 
 ## Implemented since the initial version

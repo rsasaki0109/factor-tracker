@@ -582,6 +582,42 @@ detections; engine with distance association):
   it changes nothing beyond noise; larger weights make it worse (dev HOTA
   0.617 at weight 2, 0.595 at 4).
 
+### Upper bounds and detector NMS for crowds (CODa, pedestrians)
+
+Upper bounds on the same eight windows (`scripts/eval/upper_bounds.py`):
+
+| | dev HOTA | held-out HOTA |
+| --- | --- | --- |
+| engine (distance association, NMS 0.1, score >= 0.4) | 0.618 | 0.768 |
+| perfect association on the same detections | 0.697 | 0.790 |
+| same, unmatched detections dropped | 0.731 | 0.815 |
+| perfect detections (truth boxes), engine | 0.848 | 0.955 |
+| perfect detections (truth boxes), AB3DMOT-style | 0.853 | 0.953 |
+
+The detector's bird's-eye-view NMS suppresses any box overlapping a
+higher-scoring one by more than IoU 0.1, which can remove a person standing
+next to another. The detector was run once without suppression
+(`detect_lidar_cpu.py --nms-threshold 1.0 --score-threshold 0.1`) and NMS
+re-applied offline (`scripts/eval/nms_variants.py`; IoU 0.1 reproduces the
+detector's own output exactly). Dev recall / precision at score >= 0.4: IoU
+0.1 0.801 / 0.804, 0.2 0.825 / 0.793, 0.3 0.837 / 0.773, 0.5 0.857 / 0.720;
+circle NMS (centre distance) is no better. Looser NMS finds more people but
+also duplicate boxes, and on its own lowers HOTA (IoU 0.3, score >= 0.5: dev
+0.609). Suppressing births within `--min-birth-distance-m` of a confirmed
+track absorbs the duplicates. Grid on dev (NMS IoU 0.2 / 0.3 / 0.5, score
+0.4 / 0.5, birth distance 0.8 / 1.0 / 1.2 m): best is IoU 0.3, score >= 0.5,
+0.8 m.
+
+| setting (chosen on dev) | dev HOTA / IDF1 / ID switches | held-out HOTA / IDF1 / ID switches |
+| --- | --- | --- |
+| engine, NMS 0.1, score >= 0.4 | 0.618 / 0.760 / 934 | 0.768 / 0.900 / 18 |
+| engine + birth suppression 0.8 m, NMS 0.3, score >= 0.5 | 0.628 / 0.772 / 773 | 0.777 / 0.902 / 18 |
+| AB3DMOT-style, NMS 0.1, score >= 0.4 (its best on dev) | 0.618 / 0.746 / 987 | 0.764 / 0.882 / 28 |
+| AB3DMOT-style, NMS 0.3, score >= 0.5 | 0.600 / 0.709 / 1332 | 0.752 / 0.859 / 57 |
+
+`scripts/eval/coda_tracker_eval.sh` prints the birth-suppressed engine as
+`engine_birth`.
+
 ## Reproducing
 
 ```sh
