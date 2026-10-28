@@ -618,6 +618,136 @@ track absorbs the duplicates. Grid on dev (NMS IoU 0.2 / 0.3 / 0.5, score
 `scripts/eval/coda_tracker_eval.sh` prints the birth-suppressed engine as
 `engine_birth`.
 
+### Where the remaining error is (CODa, pedestrians)
+
+Same input as the best row above (NMS IoU 0.3, score >= 0.5), dev windows:
+
+| | HOTA | DetA | AssA | IDF1 |
+| --- | --- | --- | --- | --- |
+| engine + birth suppression 0.8 m | 0.628 | 0.650 | 0.613 | 0.772 |
+| perfect association on the same detections (`scripts/eval/upper_bounds.py`) | 0.703 | 0.651 | 0.761 | 0.893 |
+| engine, tracks cut where their person changes (`scripts/eval/oracle_repair.py --split`) | 0.640 | 0.654 | 0.628 | 0.767 |
+| engine, fragments of one person joined (`--stitch`) | 0.632 | 0.650 | 0.621 | 0.786 |
+| both: perfect swap correction on the engine's own positions | 0.670 | 0.654 | 0.688 | 0.837 |
+
+Detection is already where perfect association would leave it (DetA 0.650
+against 0.651); the gap is association, mostly identity swaps in crowds.
+About 45 % of the dev switches hand a person to a track that was following
+someone else, 23 % to a newly started track, 17 % to a duplicate track that
+followed nobody, and 14 % go back and forth between two tracks.
+
+**More of the detector's candidates (negative).** Without NMS the detector
+finds more people: within 1 m, 0.901 of the dev people have a detection in
+the tracker's input, 0.947 have a candidate at score >= 0.3 and 0.965 at
+>= 0.1, and a perfect selection with perfect association would reach dev
+HOTA 0.784 instead of 0.735 (`upper_bounds.py --drop-unmatched` on the
+un-suppressed candidates at score >= 0.3, and on the tracker's input). But of the 0.3-0.5 score candidates left after
+NMS, 6576 are second boxes on a detected person, 4954 clutter and 1859
+people otherwise missed, and neither the score nor staying in place
+separates the last two. Everything tried stays at or below the baseline
+(dev HOTA; baseline 0.626 in these runs, with NMS over pedestrians only;
+code not kept):
+
+- low-score candidates only update existing tracks
+  (`--new-track-score-threshold 0.5`): 0.603 at score >= 0.3, 0.486 at >= 0.1;
+- no NMS, score >= 0.5: 0.548; circle NMS 0.5 m with low-score updates: 0.612;
+- low-score updates only within 0.3-0.5 m of a prediction, or a `1 - score`
+  term in the cost: 0.612-0.627; low-score updates used for association but
+  not reported (decoys against stealing): 0.616-0.627;
+- filling a track's gaps of up to 10 scans (interpolation or nearby
+  candidates), joining fragments: 0.617-0.628. Each miss removed adds about
+  one false positive: many gaps are scans where the person has no label, or
+  where the track is on someone else.
+
+**Swaps are a model error, not a search error.** At each transfer (a track
+moves from one person to another), `scripts/eval/swap_cost.py` scores the
+detections of the two tracks within 10 scans twice with the fixed-lag
+refiner's cost (constant-velocity Kalman NLL plus a miss cost): as the engine
+associated them, and by person. On dev the right association is the cheaper
+one at only 24 % of 679 transfers (16-30 % for position noise 0.1-0.4 m,
+process noise 0.1-8 m^2/s^3, no miss cost). No search over associations can
+repair the rest, which is why `--fgo-lag` cuts switches but does not raise
+HOTA. A velocity measurement per detection would change that: with the truth
+velocity plus 0.3 m/s noise as an extra factor the right association is
+cheaper at 59 % of the transfers (0.5 m/s: 50 %). A learning-free one,
+aligning each detection's upper-body points with the previous scans
+(horizontal translation search), has a median error of 0.26 m/s (the Kalman
+velocity: 0.19 m/s) with a heavy tail; as a robust factor (outliers capped)
+it raises the share to 29 %, where the truth velocity under the same factor
+gives 40 % (not kept).
+
+### Labels and poses of the CODa windows
+
+`scripts/eval/label_consistency.py --coda-root CODa` on the eight windows
+(teleport: a labelled id moving more than max(1 m, 3 m/s * dt) between its
+labelled scans; label tracking: a constant-velocity tracker run on the
+labelled positions themselves, scored against the label ids; static
+objects: labelled poles, trees, bins, ... in the world frame):
+
+| window | ids | teleports | label tracking HOTA / ID switches | static objects: per-instance std, scan-to-scan 95 % |
+| --- | --- | --- | --- | --- |
+| dev 13:9700 | 171 | 58 | 0.790 / 159 | 0.12 m, 0.30 m |
+| dev 20:12700 | 44 | 3 | 0.996 / 2 | 0.11 m, 0.12 m |
+| dev 20:4820 | 113 | 13 | 0.950 / 37 | 0.09 m, 0.15 m |
+| dev 20:8640 | 200 | 22 | 0.964 / 36 | 0.09 m, 0.13 m |
+| dev 20:9330 | 126 | 51 | 0.882 / 157 | 0.26 m, 0.27 m |
+| held-out 3:1800 | 22 | 0 | 1.000 / 0 | 0.06 m, 0.11 m |
+| held-out 4:6870 | 27 | 0 | 0.991 / 3 | 0.07 m, 0.10 m |
+| held-out 9:8515 | 25 | 0 | 1.000 / 0 | 0.08 m, 0.10 m |
+
+On dev 13:9700 and 20:9330 even the labelled positions cannot be tracked
+consistently with their own ids, so association scores there are bounded by
+the labels, and on 20:9330 the given poses jitter (static objects move
+0.26 m). The held-out windows are clean.
+
+### Pose correction from static landmarks (CODa)
+
+`--pose-correction` aligns each scan's static detections (the detector's
+poles, trees, bins, benches, ... at score >= 0.5 within 40 m, written by
+`convert_coda.py` as `landmarks`) with a map of the ones seen before and
+tracks the scan in the corrected frame (`docs/camera-lidar.md`). Same
+detections as above; `coda_tracker_eval.sh` prints it as `engine_pose`:
+
+| setting | dev HOTA / IDF1 / ID switches | held-out HOTA / IDF1 / ID switches |
+| --- | --- | --- |
+| engine + birth suppression 0.8 m | 0.628 / 0.772 / 773 | 0.777 / 0.902 / 18 |
+| + pose correction | 0.636 / 0.793 / 584 | 0.771 / 0.906 / 18 |
+
+It helps where the poses jitter: dev 13:9700 HOTA 0.543 -> 0.556 (switches
+258 -> 172) and 20:9330 0.585 -> 0.606 (194 -> 121). Where the poses are
+already good it adds its own noise (about 2 cm per scan): other windows
+within +-0.006 HOTA, except held-out 4:6870 (-0.010) and 9:8515 (-0.005).
+Tuned on dev with a prototype (baseline 0.626): match radius 0.5-1.0 m,
+2-5 sightings to confirm a landmark, 2-20 s memory, a 10-200 sighting mean
+and landmark scores 0.3-0.7 all give HOTA within +-0.002; starting each scan
+from the previous correction matters (from the identity: 0.623). Aligning
+to a map of the whole window instead (offline) gives 0.630.
+
+With pose noise added to every scan (`scripts/eval/coda_pose_noise_eval.sh`:
+yaw 1 degree and 0.1 m standard deviation, as a jittery odometry would give;
+truth moved with the same poses):
+
+| setting (pose noise) | dev HOTA / IDF1 / ID switches | held-out HOTA / IDF1 / ID switches |
+| --- | --- | --- |
+| engine + birth suppression 0.8 m | 0.538 / 0.692 / 2467 | 0.688 / 0.863 / 120 |
+| + pose correction | 0.631 / 0.789 / 644 | 0.767 / 0.905 / 19 |
+| AB3DMOT-style, same detections | 0.514 / 0.620 / 3682 | 0.649 / 0.781 / 304 |
+
+The correction recovers the noise-free scores.
+
+```sh
+scripts/eval/nms_variants.py det/raw det/nms iou0.3                # detector run without NMS, see above
+scripts/eval/coda_tracker_eval.sh det/nms/iou0.3 CODa 0.5 work   # engine_pose row
+scripts/eval/coda_pose_noise_eval.sh work 1.0 0.1                 # pose-noise table
+scripts/eval/label_consistency.py work/coda*/* --coda-root CODa   # labels and poses
+scripts/eval/swap_cost.py work/coda20_9330/20 work/coda20_9330/20/engine_birth.jsonl
+```
+
+Estimating ego motion and
+moving objects together is SLAMMOT (Wang et al., IJRR 2007); here the poses
+are given and only corrected, from the detections the tracker already gets:
+no point cloud and no map beyond the last few seconds.
+
 ## Reproducing
 
 ```sh

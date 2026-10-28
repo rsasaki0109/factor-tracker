@@ -10,6 +10,7 @@
 //! sensor detections
 //!     -> bounded arrival-order reorder buffer (event time preserved)
 //!     -> per-observation coordinate normalization (calibration + ego pose)
+//!     -> ego-pose correction from static landmarks (optional)
 //!     -> LiDAR position tracking (factor-tracker-core Cartesian3DTracker)
 //!     -> geometric camera association
 //!     -> camera class evidence as a soft prior (optional)
@@ -34,6 +35,7 @@ pub mod inject;
 pub mod input;
 pub mod io;
 pub mod kitti;
+pub mod landmarks;
 pub mod reorder;
 pub mod replay;
 pub mod setup;
@@ -60,5 +62,6 @@ pub use geometry::{
     CameraIntrinsics, PoseTrack, ProjectedBox, ProjectionRejection,
 };
 pub use input::{CameraBatch, CameraDetection, ClassMap, EngineBatch, LidarBatch, LidarDetection};
+pub use landmarks::{LandmarkConfig, LandmarkPoseCorrector, Rigid2D};
 pub use reorder::{AsyncReorderBuffer, IngestOutcome, ReorderConfig, ReorderCounters};
 pub use setup::EngineSetup;

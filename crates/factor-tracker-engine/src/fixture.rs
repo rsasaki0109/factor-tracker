@@ -230,6 +230,7 @@ pub fn generate(seed: u64) -> EngineResult<FixtureData> {
             arrival_time_ns: timestamp.as_nanos(),
             frame_id: "velodyne".to_string(),
             detections: lidar_detections,
+            landmarks: Vec::new(),
         });
         inputs.push(EngineInputRecord::Camera {
             schema_version: ENGINE_SCHEMA_VERSION,

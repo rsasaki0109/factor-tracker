@@ -8,7 +8,10 @@ alpha in 0.05..0.95, per-frame Hungarian matching on similarity weighted by
 the global alignment of the ids. IDF1 and MOTA use a match when
 d <= --max-distance (IDF1 with a global id-to-id assignment, MOTA with
 per-frame matching that prefers the previous match). Only confirmed tracks
-count unless --all-tracks.
+count unless --all-tracks. A frame that carries a `pose_correction` (engine
+--pose-correction) was tracked in a corrected frame; the truth of that frame
+is mapped through it first, so tracks and truth share one frame (this is the
+same as scoring each scan in the sensor frame).
 
 usage: mot_metrics.py output.jsonl truth.jsonl [--max-distance 1.0] [--zone-range-m R --setup setup.json]
 """
@@ -37,10 +40,12 @@ def load(output, truth, all_tracks, zone, setup):
         if f["timestamp_ns"] not in gt:
             continue
         objs = gt[f["timestamp_ns"]]
+        correction = np.array(f["pose_correction"]).reshape(4, 4) if f.get("pose_correction") else np.eye(4)
+        objs = [(i, correction[:3, :3] @ p + correction[:3, 3]) for i, p in objs]
         if zone is not None and poses:
             t = f["timestamp_ns"]
             k = min(range(len(poses)), key=lambda i: abs(poses[i][0] - t))
-            origin = poses[k][1][:2, 3]
+            origin = (correction @ poses[k][1])[:2, 3]
             objs = [(i, p) for i, p in objs if np.linalg.norm(p[:2] - origin) <= zone]
         tracks = [(t["track_id"], np.array(t["position"][:3], float)) for t in f["tracks"]
                   if all_tracks or t["lifecycle"] == "confirmed"]

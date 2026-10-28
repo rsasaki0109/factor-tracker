@@ -86,6 +86,8 @@ pub struct TrackerOverrides {
     pub report_coast_ms: Option<i64>,
     /// Minimum detection score to start a track.
     pub new_track_score_threshold: Option<f64>,
+    /// Correct each scan's ego pose with its static landmarks.
+    pub pose_correction: bool,
 }
 
 impl TrackerOverrides {
@@ -270,6 +272,9 @@ fn engine_config(
     }
     if let Some(value) = overrides.new_track_score_threshold {
         config.tracker.common.new_track_score_threshold = Some(value);
+    }
+    if overrides.pose_correction {
+        config.pose_correction = Some(factor_tracker_engine::LandmarkConfig::default());
     }
     if let Some(value) = overrides.lost_to_delete_ms {
         config.tracker.common.lost_to_delete_ns = value * 1_000_000;

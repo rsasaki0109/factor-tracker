@@ -44,6 +44,10 @@ pub struct LidarBatch {
     pub frame_id: FrameId,
     /// Detections.
     pub detections: Vec<LidarDetection>,
+    /// Static objects (poles, trees, bins, ...) in the sensor frame. Used only
+    /// for ego-pose correction (`EngineConfig::pose_correction`), never
+    /// tracked. Send the reliable ones: near the sensor, high score.
+    pub landmarks: Vec<Vector3<f64>>,
 }
 
 /// A single 2D camera detection.

@@ -19,6 +19,11 @@ from per-frame KITTI 2D detection files (`<frame:06d>.txt`, for example the
 output of scripts/runpod/detect_camera_yolo.py --image-dir). Ground truth is
 the same 3D boxes with their instance ids, mapped to the world frame.
 
+Static objects among the LiDAR boxes (--landmark-classes, score >=
+--landmark-score-threshold, within --landmark-max-range) go into each
+lidar_batch as `landmarks`, which the engine uses for ego-pose correction
+with --pose-correction.
+
 usage: convert_coda.py --coda-root CODa --sequence 20 --first 8640 --last 8800 \
            --camera-detections det/coda20 --out results/coda20
 """
@@ -128,6 +133,14 @@ def main() -> None:
         help="per-frame CODa-style JSON detections with scores (e.g. detect_lidar_cpu.py); default: oracle boxes",
     )
     parser.add_argument("--lidar-score-threshold", type=float, default=0.4)
+    parser.add_argument(
+        "--landmark-classes",
+        default="Pole,Tree,TrashCan,Bench,Bollard,Chair,Table,Mailbox,Railing",
+        help="static classes written as landmarks (compared without spaces, so 'Trash Can' matches TrashCan); "
+        "empty for none",
+    )
+    parser.add_argument("--landmark-score-threshold", type=float, default=0.5)
+    parser.add_argument("--landmark-max-range", type=float, default=40.0, help="horizontal, metres")
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--default-covariance", type=float, default=0.04, help="LiDAR position variance (m^2)")
     parser.add_argument(
@@ -172,22 +185,23 @@ def main() -> None:
     args.out.mkdir(parents=True, exist_ok=True)
     (args.out / "setup.json").write_text(json.dumps(setup, indent=1))
 
+    landmark_classes = {c.replace(" ", "") for c in args.landmark_classes.split(",") if c}
     inputs, truth = [], []
     for f in frames:
         t = timestamps[f]
         label_path = root / "3d_bbox" / "os1" / seq / f"3d_bbox_os1_{seq}_{f}.json"
-        labels = json.loads(label_path.read_text())["3dbbox"] if label_path.exists() else []
+        all_labels = json.loads(label_path.read_text())["3dbbox"] if label_path.exists() else []
         labels = [
-            b for b in labels
+            b for b in all_labels
             if b["classId"] in CODA_CLASSES and math.hypot(b["cX"], b["cY"], b["cZ"]) <= args.max_range
         ]
         if args.lidar_detections is None:
-            boxes = labels
+            all_boxes, boxes = all_labels, labels
         else:
             path = args.lidar_detections / f"3d_bbox_os1_{seq}_{f}.json"
-            boxes = json.loads(path.read_text())["3dbbox"] if path.exists() else []
+            all_boxes = json.loads(path.read_text())["3dbbox"] if path.exists() else []
             boxes = [
-                b for b in boxes
+                b for b in all_boxes
                 if b["classId"] in CODA_CLASSES and b.get("score", 1.0) >= args.lidar_score_threshold
                 and math.hypot(b["cX"], b["cY"], b["cZ"]) <= args.max_range
             ]
@@ -201,6 +215,12 @@ def main() -> None:
                 "shape": {"height": b["h"], "width": b["w"], "length": b["l"], "rotation_y": 0.0,
                           "corners": box_corners(b).reshape(-1).tolist()},
             })
+        landmarks = [
+            {"position": [b["cX"], b["cY"], b["cZ"]]}
+            for b in all_boxes
+            if b["classId"].replace(" ", "") in landmark_classes and b.get("score", 1.0) >= args.landmark_score_threshold
+            and math.hypot(b["cX"], b["cY"]) <= args.landmark_max_range
+        ]
         objects = []
         for b in labels:
             world = poses[f] @ np.array([b["cX"], b["cY"], b["cZ"], 1.0])
@@ -208,7 +228,7 @@ def main() -> None:
                             "position": world[:3].tolist()})
         inputs.append({"type": "lidar_batch", "schema_version": SCHEMA_VERSION, "sensor_id": LIDAR_SENSOR,
                        "sequence": f, "event_time_ns": t, "arrival_time_ns": t, "frame_id": "os1",
-                       "detections": detections})
+                       "detections": detections, **({"landmarks": landmarks} if landmarks else {})})
         truth.append({"type": "truth3d", "schema_version": SCHEMA_VERSION, "timestamp_ns": t, "objects": objects})
         if args.camera_detections is not None:
             camera = []

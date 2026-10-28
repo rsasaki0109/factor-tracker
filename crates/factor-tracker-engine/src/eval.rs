@@ -278,11 +278,22 @@ pub fn evaluate_mode(
             })
             .filter_map(|track| vector3(&track.position).map(|p| (track.track_id, p)))
             .collect();
+        // A pose-corrected frame was tracked in the corrected frame: map the
+        // truth (given with the uncorrected poses) into it.
+        let correct = |p: [f64; 3]| match frame.pose_correction.as_deref() {
+            Some(m) if m.len() == 16 => {
+                let row = |r: usize| {
+                    m[4 * r] * p[0] + m[4 * r + 1] * p[1] + m[4 * r + 2] * p[2] + m[4 * r + 3]
+                };
+                [row(0), row(1), row(2)]
+            }
+            _ => p,
+        };
         let (objects, object_classes): (Vec<(u32, [f64; 3])>, Vec<u32>) = truth_frame
             .objects
             .iter()
             .filter_map(|object| {
-                vector3(&object.position).map(|p| ((object.truth_id, p), object.class))
+                vector3(&object.position).map(|p| ((object.truth_id, correct(p)), object.class))
             })
             .unzip();
         gt_object_times += objects.len() as u64;
@@ -512,6 +523,7 @@ mod tests {
             observations: Vec::new(),
             associations: Vec::new(),
             unmatched_track_ids: Vec::new(),
+            pose_correction: None,
         };
         let truth = GroundTruthFrame {
             timestamp_ns: 0,
@@ -538,5 +550,39 @@ mod tests {
         );
         assert_eq!(metrics.class_total, 2);
         assert_eq!(metrics.class_correct, 1);
+    }
+
+    #[test]
+    fn truth_is_mapped_into_a_pose_corrected_frame() {
+        // The scan was tracked in a frame shifted by +1.5 m in x.
+        let frame = LidarFrameOutput {
+            mode: TrackingMode::LidarOnly,
+            timestamp_ns: 0,
+            tracks: vec![track(1, [1.5, 0.0, 0.0], None)],
+            observations: Vec::new(),
+            associations: Vec::new(),
+            unmatched_track_ids: Vec::new(),
+            pose_correction: Some(vec![
+                1.0, 0.0, 0.0, 1.5, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
+            ]),
+        };
+        let truth = GroundTruthFrame {
+            timestamp_ns: 0,
+            objects: vec![GroundTruthObject {
+                truth_id: 1,
+                class: 2,
+                position: vec![0.0, 0.0, 0.0],
+            }],
+        };
+        let metrics = evaluate_mode(
+            &[frame],
+            &[],
+            &[truth],
+            &[],
+            AllCounters::default(),
+            &EvalConfig::default(),
+        );
+        assert_eq!(metrics.matched_object_times, 1);
+        assert!(metrics.position_rmse.unwrap() < 1e-9);
     }
 }

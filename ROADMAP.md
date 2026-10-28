@@ -60,7 +60,14 @@ each group.
   (held-out 0.790), perfect detections 0.848 (0.955), so detection still has
   three times the headroom of association (`docs/evaluation.md`). A looser
   detector NMS (IoU 0.3, score >= 0.5) with birth suppression (0.8 m) takes a
-  first step: dev HOTA 0.628, held-out 0.777.
+  first step: dev HOTA 0.628, held-out 0.777. With those detections the
+  remaining gap is association: DetA already equals the perfect-association
+  bound, and a perfect swap correction would give dev HOTA 0.670. Using the
+  detector's low-score candidates does not help, and at three quarters of the
+  swaps the constant-velocity cost prefers the wrong association, so a better
+  search cannot fix them; two dev windows also have inconsistent labels
+  (`docs/evaluation.md`). Next: an identity cue that is reliable in crowds,
+  and a fresh, label-checked set of held-out windows.
 - Learned or adaptive gating thresholds.
 
 ## Implemented since the initial version
@@ -75,6 +82,10 @@ each group.
   stream` as a child process.
 - WebAssembly build of the 2D tracker (`crates/factor-tracker-wasm`) and a
   browser camera demo (`web/`).
+- Ego-pose correction from static landmarks (`--pose-correction`): dev HOTA
+  0.628 -> 0.636 on CODa, and robust to 1° / 0.1 m pose noise; on clean
+  poses it costs up to 0.01 HOTA. Next: a gate that leaves good poses
+  alone, and the ROS 2 node (it sends no landmarks yet).
 
 ## Implemented in the camera-assisted LiDAR SDK
 
@@ -93,8 +104,8 @@ each group.
 
 ## Not yet implemented
 
-- Ego-motion **estimation** (poses are an external input; none is estimated or
-  evaluated here).
+- Ego-motion **estimation**: poses are an external input; `--pose-correction`
+  only corrects them, from static landmarks.
 - Radar adapters and radar observation models.
 - Camera distortion models other than a rectified pinhole.
 - Non-linear (EKF/UKF) camera updates.

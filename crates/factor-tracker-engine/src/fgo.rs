@@ -672,6 +672,7 @@ mod tests {
                     observations,
                     associations,
                     unmatched_track_ids: Vec::new(),
+                    pose_correction: None,
                 }
             })
             .collect()

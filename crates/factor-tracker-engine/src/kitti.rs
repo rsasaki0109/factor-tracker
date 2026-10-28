@@ -611,6 +611,7 @@ pub fn prepare_sequence(
                         }),
                     })
                     .collect(),
+                landmarks: Vec::new(),
             });
         }
 
@@ -750,6 +751,7 @@ pub fn lidar_batch(
         event_time: timestamp,
         frame_id: FrameId::new("velodyne"),
         detections,
+        landmarks: Vec::new(),
     })
 }
 

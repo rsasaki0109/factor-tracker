@@ -614,3 +614,81 @@ fn pose_interpolation_tolerates_quaternion_round_off() {
         assert!((pose.rotation().determinant() - 1.0).abs() < 1e-12);
     }
 }
+
+/// A stationary sensor whose given poses jitter (up to 1 degree and 0.2 m
+/// from scan 5 on); five static landmarks and one standing person.
+fn jittered_scans(pose_correction: bool) -> Vec<Vec<f64>> {
+    use factor_tracker_engine::input::{EngineBatch, LidarBatch};
+    let jitter = |k: i64| -> (f64, f64) {
+        if k < 5 {
+            (0.0, 0.0)
+        } else if k % 2 == 0 {
+            (1f64.to_radians(), 0.2)
+        } else {
+            (-0.5f64.to_radians(), -0.1)
+        }
+    };
+    let samples = (0..12)
+        .map(|k| {
+            let (yaw, dx) = jitter(k);
+            let (s, c) = yaw.sin_cos();
+            let pose = RigidTransform3D::new(
+                Matrix3::new(c, -s, 0.0, s, c, 0.0, 0.0, 0.0, 1.0),
+                Vector3::new(dx, 0.0, 0.0),
+            )
+            .unwrap();
+            (Timestamp::from_nanos(k * 100_000_000), pose)
+        })
+        .collect();
+    let config = EngineConfig {
+        mode: TrackingMode::LidarOnly,
+        pose_correction: pose_correction.then(factor_tracker_engine::LandmarkConfig::default),
+        ..EngineConfig::default()
+    };
+    let mut engine = factor_tracker_engine::CameraAssistedLidarEngine::new(
+        config,
+        test_calibration(),
+        Some(PoseTrack::new(samples, 200_000_000).unwrap()),
+    )
+    .unwrap();
+    let landmarks = vec![
+        Vector3::new(5.0, 0.0, 0.0),
+        Vector3::new(0.0, 7.0, 0.0),
+        Vector3::new(-6.0, -2.0, 0.0),
+        Vector3::new(3.0, -8.0, 0.0),
+        Vector3::new(-4.0, 9.0, 0.0),
+    ];
+    for k in 0..12 {
+        let t = Timestamp::from_nanos(k * 100_000_000);
+        let batch = LidarBatch {
+            sensor_id: factor_tracker_core::SensorId::new(1),
+            sequence: k as u64,
+            event_time: t,
+            frame_id: "velodyne".into(),
+            detections: vec![lidar_detection(Vector3::new(8.0, 2.0, 0.0), Some(2))],
+            landmarks: landmarks.clone(),
+        };
+        engine.ingest(EngineBatch::Lidar(batch), t);
+    }
+    engine.flush().unwrap();
+    for frame in engine.lidar_frames() {
+        assert_eq!(frame.pose_correction.is_some(), pose_correction);
+    }
+    engine
+        .lidar_frames()
+        .iter()
+        .map(|frame| frame.observations[0].clone())
+        .collect()
+}
+
+#[test]
+fn landmarks_remove_pose_jitter_from_observations() {
+    let spread = |observations: &[Vec<f64>]| {
+        observations
+            .iter()
+            .map(|p| (p[0] - observations[0][0]).hypot(p[1] - observations[0][1]))
+            .fold(0.0, f64::max)
+    };
+    assert!(spread(&jittered_scans(false)) > 0.2);
+    assert!(spread(&jittered_scans(true)) < 0.01);
+}
