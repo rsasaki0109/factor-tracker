@@ -12,6 +12,7 @@ associates and augments them.
 sensor detections (LiDAR in the LiDAR frame, camera in image pixels)
     -> bounded arrival-order reorder buffer (event time preserved)
     -> per-observation coordinate normalization (calibration + ego pose at event time)
+    -> ego-pose correction from static landmarks (optional, --pose-correction)
     -> LiDAR position tracking (factor-tracker-core Cartesian3DTracker)
     -> geometric camera association (projected 3D track boxes vs 2D detections)
     -> camera class evidence as a *soft* prior on LiDAR association (optional)
@@ -43,6 +44,42 @@ and **never extrapolated**. A requested time outside the recorded range, or
 inside a gap larger than `pose_max_gap_ns`, yields `PoseUnavailable` and the
 affected batch is skipped with a diagnostic. LiDAR uses the pose at the LiDAR
 event time; camera projection uses the pose at the camera event time.
+
+## Ego-pose correction from static landmarks
+
+Given poses can jitter: on two of the five CODa development windows,
+labelled poles and trees move by 0.2-0.3 m between scans in the world frame
+(`docs/evaluation.md`), and every track inherits those jumps. With
+`EngineConfig::pose_correction` (`--pose-correction`), each LiDAR batch's
+`landmarks` (static objects in the LiDAR frame: poles, trees, bins, whatever
+the detector reports as static; never tracked) correct its pose:
+
+1. the landmarks go to the tracking frame with the pose and calibration, then
+   with the previous scan's correction `C`;
+2. each one is matched to the nearest confirmed map landmark (seen in 3 scans)
+   within 0.7 m;
+3. with at least 3 matches, `C` is updated by the horizontal rigid transform
+   (rotation about z plus translation) that minimises the Huber-weighted
+   distances to the matched map landmarks, solved in closed form (weighted
+   Procrustes), twice with re-matching;
+4. the scan's detections are tracked in the corrected frame `C ∘ pose`, and
+   the map is updated with the corrected landmarks (running mean over at
+   most 50 sightings; a landmark unseen for 5 s is dropped).
+
+It is the optimum of a one-scan factor graph (one pose-correction variable,
+one robust position factor per matched landmark) on top of the given poses;
+without landmarks the correction stays where it is. Each `lidar_frame` then
+carries `pose_correction`, the row-major 4x4 transform from the given
+tracking frame to the corrected one; `factor-tracker evaluate` and
+`scripts/eval/mot_metrics.py` map the truth of that frame through it, which
+is the same as scoring in the sensor frame. Camera projection uses the latest LiDAR scan's correction. Input:
+
+```json
+{"type":"lidar_batch", "...": "...", "detections":[...], "landmarks":[{"position":[5.2,-3.1,0.4]}]}
+```
+
+`scripts/coda/convert_coda.py` writes the detector's static classes (score
+>= 0.5, within 40 m) as landmarks. Code: `crates/factor-tracker-engine/src/landmarks.rs`.
 
 ## Camera projection and association
 

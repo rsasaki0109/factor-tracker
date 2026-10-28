@@ -110,6 +110,11 @@ struct TrackerArgs {
     /// start one (ByteTrack-style use of low-score detections).
     #[arg(long)]
     new_track_score_threshold: Option<f64>,
+    /// Correct each scan's ego pose with the static landmarks of its batch
+    /// (`landmarks` in lidar_batch records): the scan is aligned with a map
+    /// of the landmarks seen so far before its detections are tracked.
+    #[arg(long)]
+    pose_correction: bool,
 }
 
 impl TrackerArgs {
@@ -136,6 +141,7 @@ impl TrackerArgs {
             lost_to_delete_ms: self.lost_to_delete_ms,
             report_coast_ms: self.report_coast_ms,
             new_track_score_threshold: self.new_track_score_threshold,
+            pose_correction: self.pose_correction,
         }
     }
 }

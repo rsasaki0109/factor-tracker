@@ -60,6 +60,13 @@ pub struct LidarDetectionRecord {
     pub appearance: Option<Vec<f32>>,
 }
 
+/// A static landmark (pole, tree, bin, ...) seen by the LiDAR.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LandmarkRecord {
+    /// Position in the LiDAR frame, metres.
+    pub position: Vec<f64>,
+}
+
 /// A camera detection record.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CameraDetectionRecord {
@@ -95,6 +102,9 @@ pub enum EngineInputRecord {
         frame_id: String,
         /// Detections.
         detections: Vec<LidarDetectionRecord>,
+        /// Static landmarks in the LiDAR frame (ego-pose correction only).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        landmarks: Vec<LandmarkRecord>,
     },
     /// A camera batch.
     #[serde(rename = "camera_batch")]
@@ -210,8 +220,17 @@ impl EngineInputRecord {
                 arrival_time_ns,
                 frame_id,
                 detections,
+                landmarks,
             } => {
                 check_version(schema_version)?;
+                let landmarks = landmarks
+                    .iter()
+                    .enumerate()
+                    .map(|(index, record)| {
+                        vector::<3>(&format!("landmark {index} position"), &record.position)
+                            .map(Vector3::from)
+                    })
+                    .collect::<EngineResult<Vec<_>>>()?;
                 let detections = detections
                     .into_iter()
                     .enumerate()
@@ -258,6 +277,7 @@ impl EngineInputRecord {
                         event_time: Timestamp::from_nanos(event_time_ns),
                         frame_id: FrameId::new(frame_id),
                         detections,
+                        landmarks,
                     }),
                     Timestamp::from_nanos(arrival_time_ns),
                 ))

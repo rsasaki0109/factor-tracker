@@ -16,9 +16,10 @@
 <p align="center"><em>Same detector, two trackers, each at its best setting on dev (CODa seq 20, 16 s). Red rings: identity switches against CODa's labels.</em></p>
 
 Detector-agnostic multi-object tracking and sensor fusion in Rust: Kalman
-filtering and assignment per scan, an optional fixed-lag factor-graph
-re-association (`--fgo-lag`), and LiDAR tracks that camera detections associate
-with and label. It takes detections from any detector and outputs objects with
+filtering and assignment per scan, optional ego-pose correction from static
+landmarks (`--pose-correction`) and fixed-lag factor-graph re-association
+(`--fgo-lag`), and LiDAR tracks that camera detections associate with and
+label. It takes detections from any detector and outputs objects with
 stable IDs and uncertainty. The core is CPU-only (no GPU, ROS, Python or OpenCV
 dependency); a ROS 2 node and a [browser demo](https://rsasaki0109.github.io/factor-tracker/) are included.
 
@@ -32,15 +33,21 @@ Pedestrian tracking on 8 CODa windows, **same detector for every tracker**
 | Kalman + Mahalanobis gate | 0.1, >= 0.4 | 0.600 | 0.722 | 1151 | 0.745 | 0.888 | 22 |
 | AB3DMOT-style | 0.1, >= 0.4 | 0.618 | 0.746 | 987 | 0.764 | 0.882 | 28 |
 | factor-tracker | 0.1, >= 0.4 | 0.618 | 0.760 | 934 | 0.768 | 0.900 | **18** |
-| **factor-tracker** + birth suppression (0.8 m) | 0.3, >= 0.5 | **0.628** | **0.772** | **773** | **0.777** | **0.902** | **18** |
+| factor-tracker + birth suppression (0.8 m) | 0.3, >= 0.5 | 0.628 | 0.772 | 773 | **0.777** | 0.902 | **18** |
+| **factor-tracker** + birth suppression + pose correction | 0.3, >= 0.5 | **0.636** | **0.793** | **584** | 0.771 | **0.906** | **18** |
 
 Each tracker uses the detection setting that is best for it on dev (5
 windows); held-out (3 windows) was scored once. A looser NMS finds more people
 in crowds but also duplicate boxes; factor-tracker absorbs the duplicates by
 not starting tracks next to confirmed ones, AB3DMOT-style cannot (HOTA 0.600
-dev with the same detections). The detector was trained on most of these
-scans, so absolute numbers are optimistic for every tracker. Details:
-[`docs/evaluation.md`](docs/evaluation.md).
+dev with the same detections). Pose correction aligns each scan with the
+static objects the detector also reports (poles, trees, bins) before
+tracking: it removes the ego-pose jitter of two dev windows, and with 1° /
+0.1 m pose noise added keeps HOTA at 0.631 dev / 0.767 held-out, where the
+tracker without it drops to 0.538 / 0.688 (AB3DMOT-style 0.514 / 0.649); on
+held-out, whose poses are clean, it costs 0.006 HOTA. The detector was
+trained on most of these scans, so absolute numbers are optimistic for every
+tracker. Details: [`docs/evaluation.md`](docs/evaluation.md).
 
 ## How it works
 
@@ -51,6 +58,8 @@ Per LiDAR scan (details: [`docs/algorithms.md`](docs/algorithms.md),
 flowchart TD
   L["LiDAR detections<br/>(any 3D detector)"] --> N["Reorder by event time,<br/>transform to the tracking frame<br/>(calibration + ego pose)"]
   N --> P["Predict every track<br/>(constant-velocity Kalman, dt from timestamps)"]
+  N -.->|"optional (pose-correction)"| PC["Pose correction: align the scan's static<br/>detections (poles, trees, bins) with a<br/>landmark map, robust least squares"]
+  PC -.-> P
   P --> C["Cost per track × detection:<br/>distance to the prediction, 1 m gate<br/>(or squared Mahalanobis gate)<br/>+ optional class-prior and appearance terms"]
   C --> H["Hungarian assignment"]
   H -->|matched| U["Kalman update"]

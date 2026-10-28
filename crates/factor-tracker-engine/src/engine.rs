@@ -3,6 +3,7 @@
 //! The engine is the SDK entry point. It ties together:
 //!
 //! * calibration and (optional) ego-pose based normalization,
+//! * (optional) ego-pose correction from static landmarks,
 //! * the bounded asynchronous reorder buffer,
 //! * the core [`Cartesian3DTracker`] for LiDAR position tracking,
 //! * camera-to-track association and class evidence,
@@ -39,6 +40,7 @@ use crate::diagnostics::{
 use crate::error::{EngineError, EngineResult};
 use crate::geometry::{inverse, Box3DShape, Calibration, ProjectedBox};
 use crate::input::{CameraBatch, EngineBatch, LidarBatch};
+use crate::landmarks::{LandmarkConfig, LandmarkPoseCorrector};
 use crate::reorder::{AsyncReorderBuffer, IngestOutcome, ReorderConfig};
 
 /// How much camera information is used.
@@ -84,6 +86,10 @@ pub struct EngineConfig {
     pub max_shape_age_ns: i64,
     /// Tracks whose last spatial update is older than this are not projected.
     pub max_track_age_for_projection_ns: i64,
+    /// When set, each LiDAR batch's static landmarks correct its ego pose
+    /// before its detections are tracked ([`crate::landmarks`]). `None`
+    /// uses the poses as given.
+    pub pose_correction: Option<LandmarkConfig>,
 }
 
 impl Default for EngineConfig {
@@ -104,6 +110,7 @@ impl Default for EngineConfig {
             class_map: crate::input::ClassMap::identity(),
             max_shape_age_ns: 500_000_000,
             max_track_age_for_projection_ns: 1_000_000_000,
+            pose_correction: None,
         }
     }
 }
@@ -124,6 +131,9 @@ impl EngineConfig {
             return Err(EngineError::config(
                 "max_track_age_for_projection_ns must be > 0",
             ));
+        }
+        if let Some(pose_correction) = &self.pose_correction {
+            pose_correction.validate()?;
         }
         Ok(())
     }
@@ -190,6 +200,12 @@ pub struct LidarFrameOutput {
     pub associations: Vec<LidarAssociationOutput>,
     /// Tracks not matched by any observation.
     pub unmatched_track_ids: Vec<u64>,
+    /// With pose correction: the row-major `4x4` transform from the tracking
+    /// frame as given by the poses to the corrected one this scan was tracked
+    /// in. Map anything expressed with the given poses (e.g. ground truth)
+    /// through it before comparing it with this frame's tracks.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pose_correction: Option<Vec<f64>>,
 }
 
 /// One camera association record.
@@ -253,6 +269,7 @@ pub struct CameraAssistedLidarEngine {
     class_evidence: HashMap<TrackId, ClassEvidence>,
     last_camera_support: HashMap<TrackId, Timestamp>,
     buffer: AsyncReorderBuffer,
+    pose_corrector: Option<LandmarkPoseCorrector>,
     counters: EngineCounters,
     log: DiagnosticLog,
     lidar_frames: Vec<LidarFrameOutput>,
@@ -277,6 +294,11 @@ impl CameraAssistedLidarEngine {
             )));
         }
         let buffer = AsyncReorderBuffer::new(config.reorder.clone())?;
+        let pose_corrector = config
+            .pose_correction
+            .clone()
+            .map(LandmarkPoseCorrector::new)
+            .transpose()?;
         Ok(CameraAssistedLidarEngine {
             config,
             calibration,
@@ -286,6 +308,7 @@ impl CameraAssistedLidarEngine {
             class_evidence: HashMap::new(),
             last_camera_support: HashMap::new(),
             buffer,
+            pose_corrector,
             counters: EngineCounters::default(),
             log: DiagnosticLog::default(),
             lidar_frames: Vec::new(),
@@ -451,6 +474,22 @@ impl CameraAssistedLidarEngine {
                 }
             };
 
+        let (sensor_to_tracking, pose_correction) = match &mut self.pose_corrector {
+            Some(corrector) => {
+                let landmarks: Vec<Vector3<f64>> = batch
+                    .landmarks
+                    .iter()
+                    .map(|p| sensor_to_tracking.rotation() * p + sensor_to_tracking.translation())
+                    .collect();
+                let (correction, _) = corrector.correct(batch.event_time, &landmarks);
+                let correction = correction.to_rigid3d();
+                (
+                    crate::geometry::compose(&correction, &sensor_to_tracking),
+                    Some(crate::setup::transform_to_vec16(&correction)),
+                )
+            }
+            None => (sensor_to_tracking, None),
+        };
         let rotation = *sensor_to_tracking.rotation();
         let translation = *sensor_to_tracking.translation();
         let mut observations = Vec::with_capacity(batch.detections.len());
@@ -547,6 +586,7 @@ impl CameraAssistedLidarEngine {
                 .iter()
                 .map(|id| id.value())
                 .collect(),
+            pose_correction,
         });
         let _ = report;
         Ok(())
@@ -597,6 +637,14 @@ impl CameraAssistedLidarEngine {
                 });
                 return Ok(());
             }
+        };
+        // Tracks live in the corrected frame; the camera uses the correction
+        // of the latest LiDAR scan.
+        let camera_to_tracking = match &self.pose_corrector {
+            Some(corrector) => {
+                crate::geometry::compose(&corrector.correction().to_rigid3d(), &camera_to_tracking)
+            }
+            None => camera_to_tracking,
         };
         let tracking_to_camera = inverse(&camera_to_tracking);
 
