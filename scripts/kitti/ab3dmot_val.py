@@ -14,10 +14,13 @@ the PointRCNN detections AB3DMOT ships, and AB3DMOT's evaluator
 
   results <sequence-dir> <engine-output.jsonl> <out.txt> --category Pedestrian
       An engine output (factor-tracker replay on the prepared sequence) ->
-      one KITTI tracking result file: each confirmed track reported in a frame
+      one KITTI tracking result file: each confirmed track updated in a frame
       becomes `frame id type 0 0 alpha x1 y1 x2 y2 h w l x y z ry score` in
       rectified camera 0, at the track's position, with the size, heading,
-      image box and score of the detection that updated it.
+      image box and score of the detection that updated it. AB3DMOT's own
+      pedestrian setting writes a track from its first detection and for up
+      to three missed scans; --include-tentative --coast-scans 3 does the same
+      (with a replay that reports every track, i.e. without --report-coast-ms).
 
 Every box written is checked: mapping its detection's position back through
 the same transforms must give the detection's original location.
@@ -72,6 +75,8 @@ def results(a: argparse.Namespace) -> None:
     frame_of = {int(round(t * 1e9)): k for k, t in enumerate(times)}
     lines = []
     checked = 0
+    last_detection: dict[int, list[str]] = {}
+    lifecycles = {"confirmed", "tentative"} if a.include_tentative else {"confirmed"}
     for line in open(a.output):
         r = json.loads(line)
         if r.get("type") != "lidar_frame":
@@ -85,21 +90,27 @@ def results(a: argparse.Namespace) -> None:
         world_to_cam = velo_to_cam @ np.linalg.inv(poses[r["timestamp_ns"]] @ lidar_to_ref)
         to_cam = lambda p: (world_to_cam @ np.append(np.asarray(p, float)[:3], 1.0))[:3]  # noqa: E731
         detection_of = {x["observation_index"]: x["track_id"] for x in r["associations"] if x["track_id"] is not None}
-        by_track = {}
         for j, track in detection_of.items():
-            by_track[track] = j
+            last_detection[track] = dets[j]
             back = to_cam(r["observations"][j])
             orig = np.array([float(v) for v in dets[j][11:14]])
             if np.linalg.norm(back - orig) > 1e-3:
                 raise SystemExit(f"frame {frame}: detection {j} maps back to {back}, not {orig}")
             checked += 1
+        updated = set(detection_of.values())
         for t in r["tracks"]:
-            if t["lifecycle"] != "confirmed" or t["track_id"] not in by_track:
+            if t["lifecycle"] not in lifecycles or t["track_id"] not in last_detection:
                 continue
-            d = dets[by_track[t["track_id"]]]
+            # A track that missed this scan is written for up to --coast-scans
+            # scans, at its predicted position, with its last detection's box.
+            if t["track_id"] not in updated and t["age_since_spatial_update_ns"] > a.coast_scans * 100_000_000 + 1_000_000:
+                continue
+            d = last_detection[t["track_id"]]
             if d[0] != a.category:
                 continue
             x, y, z = to_cam(t["position"])
+            if a.detection_position and t["track_id"] in updated:
+                x, y, z = (float(v) for v in d[11:14])  # diagnostic: the detection's own location
             # alpha (observation angle) follows the heading as seen from the camera
             ry = float(d[14])
             alpha = ry - math.atan2(x, z)
@@ -124,6 +135,11 @@ def main() -> None:
     r.add_argument("out", type=Path)
     r.add_argument("--setup", type=Path, help="setup.json of the replay (default: <sequence>/setup.json)")
     r.add_argument("--category", default="Pedestrian", choices=["Pedestrian", "Car", "Cyclist"])
+    r.add_argument("--coast-scans", type=int, default=0,
+                   help="also write tracks that missed up to this many scans (needs a replay that reports them)")
+    r.add_argument("--include-tentative", action="store_true", help="also write tracks not confirmed yet")
+    r.add_argument("--detection-position", action="store_true",
+                   help="diagnostic: write an updated track at its detection's location instead of the track's")
     a = ap.parse_args()
     detections(a) if a.command == "detections" else results(a)
 
