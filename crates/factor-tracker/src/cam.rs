@@ -85,6 +85,10 @@ pub struct TrackerOverrides {
     pub lost_to_delete_ms: Option<i64>,
     /// Report only tracks observed within this long (ms).
     pub report_coast_ms: Option<i64>,
+    /// Weight of the newest detection in a track's confidence.
+    pub confidence_alpha: Option<f64>,
+    /// Report only tracks with at least this confidence.
+    pub report_min_confidence: Option<f64>,
     /// Minimum detection score to start a track.
     pub new_track_score_threshold: Option<f64>,
     /// Correct each scan's ego pose with its static landmarks.
@@ -96,13 +100,21 @@ pub struct TrackerOverrides {
 }
 
 impl TrackerOverrides {
-    /// Drops reported tracks not observed within `report_coast_ms`.
+    /// Drops reported tracks not observed within `report_coast_ms` or below
+    /// `report_min_confidence`.
     fn filter_reported(&self, frames: &mut [factor_tracker_engine::LidarFrameOutput]) {
         if let Some(ms) = self.report_coast_ms {
-            for frame in frames {
+            for frame in frames.iter_mut() {
                 frame
                     .tracks
                     .retain(|t| t.age_since_spatial_update_ns <= ms * 1_000_000);
+            }
+        }
+        if let Some(min) = self.report_min_confidence {
+            for frame in frames.iter_mut() {
+                frame
+                    .tracks
+                    .retain(|t| t.confidence.is_none_or(|c| c >= min));
             }
         }
     }
@@ -294,6 +306,9 @@ fn engine_config(
     }
     if overrides.pose_correction {
         config.pose_correction = Some(factor_tracker_engine::LandmarkConfig::default());
+    }
+    if let Some(value) = overrides.confidence_alpha {
+        config.confidence_alpha = value;
     }
     if let Some(value) = overrides.lost_to_delete_ms {
         config.tracker.common.lost_to_delete_ns = value * 1_000_000;

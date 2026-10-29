@@ -483,6 +483,7 @@ mod tests {
             class_prior: None,
             contributing_sensors: vec![1],
             observation_times_count: 1,
+            confidence: None,
         }
     }
 

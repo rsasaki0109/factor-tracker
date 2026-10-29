@@ -16,11 +16,13 @@ the PointRCNN detections AB3DMOT ships, and AB3DMOT's evaluator
       An engine output (factor-tracker replay on the prepared sequence) ->
       one KITTI tracking result file: each confirmed track updated in a frame
       becomes `frame id type 0 0 alpha x1 y1 x2 y2 h w l x y z ry score` in
-      rectified camera 0, at the track's position, with the size, heading,
-      image box and score of the detection that updated it. AB3DMOT's own
+      rectified camera 0, at the track's position, with the size, heading and
+      image box of the detection that updated it and the track's confidence
+      as the score (log-odds, the scale of PointRCNN's scores). AB3DMOT's own
       pedestrian setting writes a track from its first detection and for up
       to three missed scans; --include-tentative --coast-scans 3 does the same
-      (with a replay that reports every track, i.e. without --report-coast-ms).
+      (with a replay that reports every track, i.e. without --report-coast-ms;
+      the replay's --report-min-confidence decides which tracks are reported).
 
 Every box written is checked: mapping its detection's position back through
 the same transforms must give the detection's original location.
@@ -115,8 +117,12 @@ def results(a: argparse.Namespace) -> None:
             ry = float(d[14])
             alpha = ry - math.atan2(x, z)
             alpha = (alpha + math.pi) % (2 * math.pi) - math.pi
+            # scores as log-odds, PointRCNN's own scale (as AB3DMOT writes them)
+            p = t["confidence"] if a.score == "confidence" else float(d[15])
+            p = min(max(p, 1e-6), 1 - 1e-6)
+            score = math.log(p / (1 - p))
             lines.append(f"{frame} {t['track_id']} {a.category} 0 0 {alpha:.6f} {d[4]} {d[5]} {d[6]} {d[7]} "
-                         f"{d[8]} {d[9]} {d[10]} {x:.6f} {y:.6f} {z:.6f} {ry:.6f} {float(d[15]):.6f}")
+                         f"{d[8]} {d[9]} {d[10]} {x:.6f} {y:.6f} {z:.6f} {ry:.6f} {score:.6f}")
     a.out.parent.mkdir(parents=True, exist_ok=True)
     a.out.write_text("".join(line + "\n" for line in lines))
     print(f"{a.out}: {len(lines)} boxes ({checked} detections mapped back exactly)")
@@ -138,6 +144,9 @@ def main() -> None:
     r.add_argument("--coast-scans", type=int, default=0,
                    help="also write tracks that missed up to this many scans (needs a replay that reports them)")
     r.add_argument("--include-tentative", action="store_true", help="also write tracks not confirmed yet")
+    r.add_argument("--score", choices=["detection", "confidence"], default="confidence",
+                   help="box score: the track's confidence (engine output), or the score of the detection "
+                        "that last updated it; written as log-odds")
     r.add_argument("--detection-position", action="store_true",
                    help="diagnostic: write an updated track at its detection's location instead of the track's")
     a = ap.parse_args()

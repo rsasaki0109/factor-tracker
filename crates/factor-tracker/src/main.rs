@@ -106,6 +106,15 @@ struct TrackerArgs {
     /// 0 reports only tracks updated in the scan. Default: report all.
     #[arg(long)]
     report_coast_ms: Option<i64>,
+    /// Weight of the newest detection in a track's confidence (the moving
+    /// average of its detection scores' log-odds), in (0, 1]. Default 0.3.
+    #[arg(long)]
+    confidence_alpha: Option<f64>,
+    /// Only report tracks whose confidence is at least this (0-1). The
+    /// track keeps its id while it is not reported (e.g. a person far away
+    /// seen with weak detections).
+    #[arg(long)]
+    report_min_confidence: Option<f64>,
     /// Detections below this score only update existing tracks and never
     /// start one (ByteTrack-style use of low-score detections).
     #[arg(long)]
@@ -150,6 +159,8 @@ impl TrackerArgs {
             confirmed_to_lost_ms: self.confirmed_to_lost_ms,
             lost_to_delete_ms: self.lost_to_delete_ms,
             report_coast_ms: self.report_coast_ms,
+            confidence_alpha: self.confidence_alpha,
+            report_min_confidence: self.report_min_confidence,
             new_track_score_threshold: self.new_track_score_threshold,
             pose_correction: self.pose_correction,
             smooth_lag: self.smooth_lag,
