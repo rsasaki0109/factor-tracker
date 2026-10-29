@@ -524,6 +524,7 @@ mod tests {
             associations: Vec::new(),
             unmatched_track_ids: Vec::new(),
             pose_correction: None,
+            smoothed: false,
         };
         let truth = GroundTruthFrame {
             timestamp_ns: 0,
@@ -565,6 +566,7 @@ mod tests {
             pose_correction: Some(vec![
                 1.0, 0.0, 0.0, 1.5, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
             ]),
+            smoothed: false,
         };
         let truth = GroundTruthFrame {
             timestamp_ns: 0,

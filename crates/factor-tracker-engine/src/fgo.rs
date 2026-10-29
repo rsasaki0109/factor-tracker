@@ -673,6 +673,7 @@ mod tests {
                     associations,
                     unmatched_track_ids: Vec::new(),
                     pose_correction: None,
+                    smoothed: false,
                 }
             })
             .collect()

@@ -115,6 +115,16 @@ struct TrackerArgs {
     /// of the landmarks seen so far before its detections are tracked.
     #[arg(long)]
     pose_correction: bool,
+    /// Re-estimate each scan's track positions and velocities from the next
+    /// N LiDAR scans too (fixed-lag smoothing; frames come out N scans
+    /// late); 0 disables. Ids are unchanged. 5 (0.5 s at 10 Hz) cuts the
+    /// median velocity error by 23-29 % on CODa pedestrians.
+    #[arg(long, default_value_t = 0)]
+    smooth_lag: usize,
+    /// With --smooth-lag in `stream`: write each frame twice, at once
+    /// (real-time) and when it leaves the window (`"smoothed": true`).
+    #[arg(long)]
+    smooth_realtime: bool,
 }
 
 impl TrackerArgs {
@@ -142,6 +152,8 @@ impl TrackerArgs {
             report_coast_ms: self.report_coast_ms,
             new_track_score_threshold: self.new_track_score_threshold,
             pose_correction: self.pose_correction,
+            smooth_lag: self.smooth_lag,
+            smooth_realtime: self.smooth_realtime,
         }
     }
 }

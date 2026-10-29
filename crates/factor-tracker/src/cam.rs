@@ -16,6 +16,7 @@ use factor_tracker_engine::kitti::{prepare_sequence, KittiSequencePaths};
 use factor_tracker_engine::setup::EngineSetup;
 use factor_tracker_engine::{
     fixture, replay, AllCounters, CameraAssistedLidarEngine, FgoConfig, FixedLagRefiner,
+    FixedLagSmoother,
 };
 
 use crate::jsonl::CliResult;
@@ -88,6 +89,10 @@ pub struct TrackerOverrides {
     pub new_track_score_threshold: Option<f64>,
     /// Correct each scan's ego pose with its static landmarks.
     pub pose_correction: bool,
+    /// Fixed-lag smoothing window in LiDAR scans; 0 disables.
+    pub smooth_lag: usize,
+    /// With `smooth_lag` in `stream`: also write the real-time frames.
+    pub smooth_realtime: bool,
 }
 
 impl TrackerOverrides {
@@ -100,6 +105,20 @@ impl TrackerOverrides {
                     .retain(|t| t.age_since_spatial_update_ns <= ms * 1_000_000);
             }
         }
+    }
+
+    /// The smoother, when `smooth_lag` > 0, with the tracker's motion model.
+    fn smoother(&self, config: &EngineConfig) -> CliResult<Option<FixedLagSmoother>> {
+        if self.smooth_lag == 0 {
+            return Ok(None);
+        }
+        if self.fgo_lag > 0 {
+            return Err("--smooth-lag and --fgo-lag cannot be combined (the refiner re-estimates the states)".into());
+        }
+        Ok(Some(FixedLagSmoother::new(
+            self.smooth_lag,
+            config.tracker.accel_spectral_density,
+        )))
     }
 
     /// The refiner, when `fgo_lag` > 0.
@@ -292,8 +311,17 @@ pub fn replay_setup(
     let inputs = read_inputs(inputs_path)?;
     let injected = inject::apply(&inputs, &options.injection);
     let config = engine_config(options.mode, &calibration, options.tracker);
+    let mut smoother = options.tracker.smoother(&config)?;
     let engine = replay::run(calibration, poses, config, &injected)?;
     let mut lidar_frames = engine.lidar_frames().to_vec();
+    if let Some(smoother) = smoother.as_mut() {
+        let mut smoothed: Vec<_> = lidar_frames
+            .into_iter()
+            .flat_map(|frame| smoother.push(frame))
+            .collect();
+        smoothed.extend(smoother.finish());
+        lidar_frames = smoothed;
+    }
     if let Some(mut refiner) = options.tracker.refiner() {
         let mut refined = Vec::with_capacity(lidar_frames.len());
         for frame in lidar_frames {
@@ -358,6 +386,7 @@ pub fn run_stream(
     let (calibration, poses) = load_setup(setup)?;
     let mut config = engine_config(parse_mode(mode)?, &calibration, tracker);
     config.reorder.window_ns = reorder_window_ns;
+    let mut smoother = tracker.smoother(&config)?;
     let mut engine = CameraAssistedLidarEngine::new(config, calibration, poses)?;
     let mut refiner = tracker.refiner();
     let report = tracker;
@@ -378,10 +407,24 @@ pub fn run_stream(
         };
         engine.ingest(batch, arrival);
         engine.poll(arrival)?;
-        write_stream_frames(&mut engine, refiner.as_mut(), &report, false, &mut output)?;
+        write_stream_frames(
+            &mut engine,
+            refiner.as_mut(),
+            smoother.as_mut(),
+            &report,
+            false,
+            &mut output,
+        )?;
     }
     engine.flush()?;
-    write_stream_frames(&mut engine, refiner.as_mut(), &report, true, &mut output)?;
+    write_stream_frames(
+        &mut engine,
+        refiner.as_mut(),
+        smoother.as_mut(),
+        &report,
+        true,
+        &mut output,
+    )?;
     Ok(())
 }
 
@@ -415,11 +458,27 @@ pub fn run_refine(input: &Path, output: &Path, mut tracker: TrackerOverrides) ->
 fn write_stream_frames(
     engine: &mut CameraAssistedLidarEngine,
     refiner: Option<&mut FixedLagRefiner>,
+    smoother: Option<&mut FixedLagSmoother>,
     report: &TrackerOverrides,
     finish: bool,
     output: &mut impl Write,
 ) -> CliResult<()> {
     let mut lidar = engine.take_lidar_frames();
+    if let Some(smoother) = smoother {
+        let realtime = if report.smooth_realtime {
+            lidar.clone()
+        } else {
+            Vec::new()
+        };
+        let mut smoothed: Vec<_> = lidar
+            .into_iter()
+            .flat_map(|frame| smoother.push(frame))
+            .collect();
+        if finish {
+            smoothed.extend(smoother.finish());
+        }
+        lidar = realtime.into_iter().chain(smoothed).collect();
+    }
     if let Some(refiner) = refiner {
         let mut refined: Vec<_> = lidar
             .into_iter()

@@ -14,6 +14,7 @@ sensor detections (LiDAR in the LiDAR frame, camera in image pixels)
     -> per-observation coordinate normalization (calibration + ego pose at event time)
     -> ego-pose correction from static landmarks (optional, --pose-correction)
     -> LiDAR position tracking (factor-tracker-core Cartesian3DTracker)
+    -> fixed-lag smoothing of the LiDAR tracks (optional, --smooth-lag)
     -> geometric camera association (projected 3D track boxes vs 2D detections)
     -> camera class evidence as a *soft* prior on LiDAR association (optional)
     -> unified track output + diagnostics
@@ -80,6 +81,22 @@ is the same as scoring in the sensor frame. Camera projection uses the latest Li
 
 `scripts/coda/convert_coda.py` writes the detector's static classes (score
 >= 0.5, within 40 m) as landmarks. Code: `crates/factor-tracker-engine/src/landmarks.rs`.
+
+## Fixed-lag smoothing
+
+With `--smooth-lag N` each LiDAR frame is emitted N scans late with every
+track's position, velocity and covariance re-estimated from the detections of
+the next N scans too (`FixedLagSmoother`,
+`crates/factor-tracker-engine/src/smoother.rs`): a Rauch-Tung-Striebel
+backward pass over the engine's own filtered states, with the tracker's
+motion model, so it is the marginal of each track's factor graph over the
+window. Nothing is re-associated: ids, lifecycles and observations stay as
+they are, and smoothed frames carry `"smoothed": true`. `stream
+--smooth-realtime` writes every frame twice, at once and smoothed, so a live
+consumer can use either (the ROS 2 node publishes them as `tracks` and
+`tracks/smoothed`); `mot_metrics.py` and `velocity_error.py` score the
+smoothed ones of such a file unless `--realtime`. It is not combined with
+`--fgo-lag`, whose refiner re-estimates the states itself.
 
 ## Camera projection and association
 

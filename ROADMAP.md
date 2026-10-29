@@ -84,8 +84,11 @@ each group.
   browser camera demo (`web/`).
 - Ego-pose correction from static landmarks (`--pose-correction`): dev HOTA
   0.628 -> 0.636 on CODa, and robust to 1° / 0.1 m pose noise; on clean
-  poses it costs up to 0.01 HOTA. Next: a gate that leaves good poses
-  alone, and the ROS 2 node (it sends no landmarks yet).
+  poses it costs up to 0.01 HOTA. The ROS 2 node sends `landmark_classes`
+  as landmarks. Next: a gate that leaves good poses alone.
+- Fixed-lag smoothing (`--smooth-lag`, ROS 2 `tracks/smoothed`): at 0.5 s
+  the velocity error drops by 23-29 % and HOTA rises (CODa held-out 0.777 ->
+  0.782). Next: smoothing on top of `--fgo-lag`.
 
 ## Implemented in the camera-assisted LiDAR SDK
 

@@ -3,11 +3,12 @@
 # its detections for the eight CODa evaluation windows (five development
 # windows, three held-out), keeps pedestrians only (detections and truth),
 # runs the engine (also with births suppressed within 0.8 m of a confirmed
-# track, which absorbs duplicate boxes, and on top of that with each scan's
-# ego pose corrected by the detector's static objects) and an AB3DMOT-style
-# baseline on them
-# and prints mean HOTA / DetA / AssA / MOTA / IDF1 per split, plus pedestrian
-# detection recall and precision.
+# track, which absorbs duplicate boxes; on top of that with 0.5 s fixed-lag
+# smoothing, with each scan's ego pose corrected by the detector's static
+# objects, and with both) and an AB3DMOT-style baseline on them, and prints
+# mean HOTA / DetA / AssA / MOTA / IDF1, ID switches and the median velocity
+# error (scripts/eval/velocity_error.py) per split, plus pedestrian detection
+# recall and precision.
 #
 # usage: scripts/eval/coda_tracker_eval.sh <detections-root> <coda-root> [score-threshold] [work-dir]
 #   detections-root  one directory per window, coda<seq>_<first>/, holding
@@ -30,14 +31,17 @@ prior="--initial-velocity-variance 1 --accel-spectral-density 0.5 --report-coast
 declare -A CONFIGS=(
   [engine_distance]="$prior --max-association-distance-m 1.0 --recent-track-window-ns 0"
   [engine_birth]="$prior --max-association-distance-m 1.0 --recent-track-window-ns 0 --min-birth-distance-m 0.8"
+  [engine_smooth]="$prior --max-association-distance-m 1.0 --recent-track-window-ns 0 --min-birth-distance-m 0.8 --smooth-lag 5"
   [engine_pose]="$prior --max-association-distance-m 1.0 --recent-track-window-ns 0 --min-birth-distance-m 0.8 --pose-correction"
+  [engine_pose_smooth]="$prior --max-association-distance-m 1.0 --recent-track-window-ns 0 --min-birth-distance-m 0.8 --pose-correction --smooth-lag 5"
   [engine_mahalanobis]="$prior --gate-squared-mahalanobis 5.99"
 )
 mean() { "$PY" -c "
 import json, sys
 ms = [json.loads(l) for l in open(sys.argv[2])]
+vs = [json.loads(l) for l in open(sys.argv[3])]
 print(f'{sys.argv[1]:20s}', ' '.join(f'{k} {sum(m[k] for m in ms) / len(ms):.3f}' for k in ['HOTA', 'DetA', 'AssA', 'MOTA', 'IDF1']),
-      'IDSW', int(sum(m['IDSW'] for m in ms)))" "$1" "$2"; }
+      'IDSW', int(sum(m['IDSW'] for m in ms)), 'velocity %.3f m/s' % (sum(v['median'] for v in vs) / len(vs)))" "$1" "$2" "$3"; }
 for split in dev heldout; do
   [[ $split == dev ]] && windows=$DEV || windows=$HELDOUT
   echo "== $split (score >= $th)"
@@ -67,11 +71,15 @@ PY
       $cli replay --setup "$d/setup.json" --inputs "$d/inputs.jsonl" --mode lidar_only --output "$d/$config.jsonl" \
         --diagnostics /dev/null ${CONFIGS[$config]} > /dev/null
       "$PY" "$repo/scripts/eval/mot_metrics.py" "$d/$config.jsonl" "$d/truth.jsonl" --json >> "$work/$split.$config.txt"
+      "$PY" "$repo/scripts/eval/velocity_error.py" "$d/$config.jsonl" "$d/truth.jsonl" --json >> "$work/$split.$config.velocity.txt"
     done
     "$PY" "$repo/scripts/eval/baselines.py" ab3dmot "$d/engine_mahalanobis.jsonl" "$d/ab3dmot.jsonl" --gate 0.8 --max-age 8 --min-hits 2
     "$PY" "$repo/scripts/eval/mot_metrics.py" "$d/ab3dmot.jsonl" "$d/truth.jsonl" --json >> "$work/$split.ab3dmot.txt"
+    "$PY" "$repo/scripts/eval/velocity_error.py" "$d/ab3dmot.jsonl" "$d/truth.jsonl" --json >> "$work/$split.ab3dmot.velocity.txt"
   done
-  for config in engine_distance engine_birth engine_pose engine_mahalanobis ab3dmot; do mean "$config" "$work/$split.$config.txt"; done
+  for config in engine_distance engine_birth engine_smooth engine_pose engine_pose_smooth engine_mahalanobis ab3dmot; do
+    mean "$config" "$work/$split.$config.txt" "$work/$split.$config.velocity.txt"
+  done
   "$PY" "$repo/scripts/eval/coda_detections.py" "$dets" "$coda" $windows
 done
 echo "work dir: $work"

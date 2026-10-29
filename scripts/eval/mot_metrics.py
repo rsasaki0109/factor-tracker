@@ -11,7 +11,9 @@ per-frame matching that prefers the previous match). Only confirmed tracks
 count unless --all-tracks. A frame that carries a `pose_correction` (engine
 --pose-correction) was tracked in a corrected frame; the truth of that frame
 is mapped through it first, so tracks and truth share one frame (this is the
-same as scoring each scan in the sensor frame).
+same as scoring each scan in the sensor frame). An output holding both
+real-time and smoothed frames (`stream --smooth-lag N --smooth-realtime`) is
+scored on the smoothed ones, or with --realtime on the others.
 
 usage: mot_metrics.py output.jsonl truth.jsonl [--max-distance 1.0] [--zone-range-m R --setup setup.json]
 """
@@ -24,8 +26,16 @@ import numpy as np
 from scipy.optimize import linear_sum_assignment
 
 
-def load(output, truth, all_tracks, zone, setup):
+def lidar_frames(output, realtime=False):
+    """The output's lidar_frame records; one kind if it holds both real-time and smoothed frames."""
     frames = [json.loads(l) for l in open(output) if '"lidar_frame"' in l]
+    if any(f.get("smoothed") for f in frames) and not all(f.get("smoothed") for f in frames):
+        frames = [f for f in frames if bool(f.get("smoothed")) != realtime]
+    return frames
+
+
+def load(output, truth, all_tracks, zone, setup, realtime=False):
+    frames = lidar_frames(output, realtime)
     gt = {}
     for line in open(truth):
         r = json.loads(line)
@@ -177,8 +187,9 @@ def main():
     ap.add_argument("--zone-range-m", type=float)
     ap.add_argument("--setup")
     ap.add_argument("--json", action="store_true")
+    ap.add_argument("--realtime", action="store_true", help="score the real-time frames of a dual output")
     a = ap.parse_args()
-    seq = load(a.output, a.truth, a.all_tracks, a.zone_range_m, a.setup)
+    seq = load(a.output, a.truth, a.all_tracks, a.zone_range_m, a.setup, a.realtime)
     m = {**hota(seq, a.max_distance), **clear_and_id(seq, a.max_distance)}
     if a.json:
         print(json.dumps({k: float(v) for k, v in m.items()}))

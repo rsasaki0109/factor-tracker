@@ -58,3 +58,17 @@ def test_tracks_from_output_filters_and_splits_covariance():
     assert out["velocity_covariance"][0] == [21.0, 22.0, 23.0]
     assert len(convert.tracks_from_output(line, include_tentative=True)["tracks"]) == 2
     assert convert.tracks_from_output(json.dumps({"type": "camera_frame"})) is None
+
+
+def test_lidar_batch_record_carries_landmarks_only_when_given():
+    detection = {"position": [1, 2, 3], "covariance": [[1, 0, 0], [0, 1, 0], [0, 0, 1]], "class_label": 2, "score": 0.9}
+    assert "landmarks" not in json.loads(convert.lidar_batch_record([detection], "odom", 1, 100, 120))
+    record = json.loads(convert.lidar_batch_record([detection], "odom", 1, 100, 120, [[5.0, 0.0, 0.5]]))
+    assert record["landmarks"] == [{"position": [5.0, 0.0, 0.5]}]
+
+
+def test_tracks_from_output_reports_smoothed_frames():
+    line = json.dumps({"type": "lidar_frame", "timestamp_ns": 5, "tracks": []})
+    assert convert.tracks_from_output(line)["smoothed"] is False
+    line = json.dumps({"type": "lidar_frame", "timestamp_ns": 5, "tracks": [], "smoothed": True})
+    assert convert.tracks_from_output(line)["smoothed"] is True

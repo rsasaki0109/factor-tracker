@@ -66,11 +66,13 @@ def parse_class_map(entries):
     return out
 
 
-def lidar_batch_record(detections, frame_id, sequence, event_time_ns, arrival_time_ns):
+def lidar_batch_record(detections, frame_id, sequence, event_time_ns, arrival_time_ns, landmarks=()):
     """One `lidar_batch` input line.
 
     `detections` holds dicts with `position` (3 floats, already in
     `frame_id`), `covariance` (3x3), `class_label` (int or None) and `score`.
+    `landmarks` are positions of static objects in `frame_id`, for the
+    engine's --pose-correction.
     """
     records = []
     for d in detections:
@@ -82,18 +84,19 @@ def lidar_batch_record(detections, frame_id, sequence, event_time_ns, arrival_ti
         if d["class_label"] is not None:
             record["class"] = d["class_label"]
         records.append(record)
-    return json.dumps(
-        {
-            "type": "lidar_batch",
-            "schema_version": SCHEMA_VERSION,
-            "sensor_id": LIDAR_SENSOR_ID,
-            "sequence": sequence,
-            "event_time_ns": event_time_ns,
-            "arrival_time_ns": arrival_time_ns,
-            "frame_id": frame_id,
-            "detections": records,
-        }
-    )
+    batch = {
+        "type": "lidar_batch",
+        "schema_version": SCHEMA_VERSION,
+        "sensor_id": LIDAR_SENSOR_ID,
+        "sequence": sequence,
+        "event_time_ns": event_time_ns,
+        "arrival_time_ns": arrival_time_ns,
+        "frame_id": frame_id,
+        "detections": records,
+    }
+    if landmarks:
+        batch["landmarks"] = [{"position": list(p)} for p in landmarks]
+    return json.dumps(batch)
 
 
 def setup_document(tracking_frame):
@@ -121,7 +124,8 @@ def tracks_from_output(line, include_tentative=False):
 
     Each track: `id`, `timestamp_ns`, `position`, `velocity`,
     `position_covariance` and `velocity_covariance` (3x3), `classification`,
-    `prediction_only`.
+    `prediction_only`. `smoothed` is true for a frame re-estimated with later
+    scans (engine --smooth-lag), which arrives that many scans late.
     """
     record = json.loads(line)
     if record.get("type") != "lidar_frame":
@@ -144,7 +148,7 @@ def tracks_from_output(line, include_tentative=False):
                 "prediction_only": track["prediction_only"],
             }
         )
-    return {"timestamp_ns": record["timestamp_ns"], "tracks": tracks}
+    return {"timestamp_ns": record["timestamp_ns"], "tracks": tracks, "smoothed": record.get("smoothed", False)}
 
 
 def covariance_36(block):

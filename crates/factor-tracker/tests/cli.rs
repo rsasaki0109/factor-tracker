@@ -310,3 +310,53 @@ fn stream_with_fgo_lag_matches_replay_with_fgo_lag() {
     assert_eq!(streamed.len(), expected.len());
     assert_eq!(streamed, expected);
 }
+
+#[test]
+fn stream_with_smoothing_writes_realtime_and_smoothed_frames() {
+    let dir = temp_dir("stream-smooth");
+    assert!(cli()
+        .args(["cam-fixture", "--out-dir"])
+        .arg(&dir)
+        .status()
+        .unwrap()
+        .success());
+    let run = |extra: &[&str]| -> Vec<Value> {
+        let output = cli()
+            .args(["stream", "--mode", "lidar_only", "--setup"])
+            .arg(dir.join("setup.json"))
+            .args(extra)
+            .stdin(std::fs::File::open(dir.join("inputs.jsonl")).unwrap())
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        String::from_utf8(output.stdout)
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .filter(|v: &Value| v["type"] == "lidar_frame")
+            .collect()
+    };
+    let plain = run(&[]);
+    let dual = run(&["--smooth-lag", "3", "--smooth-realtime"]);
+    let realtime: Vec<&Value> = dual
+        .iter()
+        .filter(|v| v.get("smoothed").is_none())
+        .collect();
+    let smoothed: Vec<&Value> = dual.iter().filter(|v| v["smoothed"] == true).collect();
+    // The real-time frames are the unsmoothed ones; every frame is also
+    // emitted smoothed, with the same timestamps and track ids.
+    assert_eq!(realtime, plain.iter().collect::<Vec<_>>());
+    assert_eq!(smoothed.len(), plain.len());
+    for (s, p) in smoothed.iter().zip(&plain) {
+        assert_eq!(s["timestamp_ns"], p["timestamp_ns"]);
+        let ids = |v: &Value| -> Vec<u64> {
+            v["tracks"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|t| t["track_id"].as_u64().unwrap())
+                .collect()
+        };
+        assert_eq!(ids(s), ids(p));
+    }
+}

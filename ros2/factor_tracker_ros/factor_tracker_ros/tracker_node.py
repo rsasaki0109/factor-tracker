@@ -10,6 +10,8 @@ transform has not arrived yet wait in a queue (in order) for up to
 Subscribes:  detections (vision_msgs/Detection3DArray)
 Publishes:   tracks (derived_object_msgs/ObjectWithCovarianceArray)
              tracks/markers (visualization_msgs/MarkerArray)
+             tracks/smoothed (with smooth_lag > 0: the same tracks re-estimated
+             with the next smooth_lag scans, published that many scans late)
 """
 
 import json
@@ -57,6 +59,14 @@ class TrackerNode(Node):
         fgo_lag = p("fgo_lag", 0).value
         if fgo_lag > 0:
             engine_args += ["--fgo-lag", str(fgo_lag)]
+        smooth_lag = p("smooth_lag", 0).value
+        if smooth_lag > 0:
+            engine_args += ["--smooth-lag", str(smooth_lag), "--smooth-realtime"]
+        if p("pose_correction", False).value:
+            engine_args += ["--pose-correction"]
+        # Detector classes of static objects (poles, trees, ...): sent as
+        # landmarks for pose_correction, never tracked.
+        self.landmark_classes = set(p("landmark_classes", [""]).value) - {""}
         self.class_map = convert.parse_class_map(
             p("class_map", ["person:2", "pedestrian:2", "Pedestrian:2"]).value)
         self.keep_unmapped = p("keep_unmapped_classes", False).value
@@ -70,6 +80,8 @@ class TrackerNode(Node):
         self.queue = deque()
         self.create_timer(0.02, self.drain_queue)
         self.tracks_pub = self.create_publisher(ObjectWithCovarianceArray, "tracks", 10)
+        self.smoothed_pub = (self.create_publisher(ObjectWithCovarianceArray, "tracks/smoothed", 10)
+                             if smooth_lag > 0 else None)
         self.markers_pub = self.create_publisher(MarkerArray, "tracks/markers", 10)
         self.create_subscription(Detection3DArray, "detections", lambda msg: self.queue.append(msg), 10)
 
@@ -118,9 +130,14 @@ class TrackerNode(Node):
         return convert.quaternion_to_matrix(q.x, q.y, q.z, q.w), [t.x, t.y, t.z]
 
     def on_detections(self, msg, rotation, translation):
-        detections = []
+        detections, landmarks = [], []
         for detection in msg.detections:
             best = max(detection.results, key=lambda r: r.hypothesis.score, default=None)
+            if best is not None and best.hypothesis.class_id in self.landmark_classes:
+                if best.hypothesis.score >= self.min_score:
+                    center = detection.bbox.center.position
+                    landmarks.append(convert.transform_point(rotation, translation, [center.x, center.y, center.z]))
+                continue
             label, score = None, 1.0
             if best is not None:
                 score = best.hypothesis.score
@@ -142,7 +159,7 @@ class TrackerNode(Node):
         self.sequence += 1
         line = convert.lidar_batch_record(detections, self.tracking_frame, self.sequence,
                                           stamp_to_ns(msg.header.stamp),
-                                          self.get_clock().now().nanoseconds)
+                                          self.get_clock().now().nanoseconds, landmarks)
         try:
             self.engine.stdin.write(line + "\n")
             self.engine.stdin.flush()
@@ -152,17 +169,19 @@ class TrackerNode(Node):
     def read_engine(self):
         for line in self.engine.stdout:
             frame = convert.tracks_from_output(line, self.include_tentative)
-            if frame is not None:
+            if frame is None:
+                continue
+            if frame["smoothed"]:
+                if self.smoothed_pub is not None:
+                    self.smoothed_pub.publish(self.tracks_message(frame))
+            else:
                 self.publish(frame)
         self.get_logger().info(f"engine exited with code {self.engine.wait()}")
 
-    def publish(self, frame):
-        stamp = ns_to_stamp(frame["timestamp_ns"])
+    def tracks_message(self, frame):
         array = ObjectWithCovarianceArray()
-        array.header.stamp = stamp
+        array.header.stamp = ns_to_stamp(frame["timestamp_ns"])
         array.header.frame_id = self.tracking_frame
-        markers = MarkerArray()
-        ids = set()
         for track in frame["tracks"]:
             obj = ObjectWithCovariance()
             obj.header = array.header
@@ -177,8 +196,16 @@ class TrackerNode(Node):
             obj.twist.twist.linear.x, obj.twist.twist.linear.y, obj.twist.twist.linear.z = vx, vy, vz
             obj.twist.covariance = convert.covariance_36(track["velocity_covariance"])
             array.objects.append(obj)
+        return array
+
+    def publish(self, frame):
+        array = self.tracks_message(frame)
+        markers = MarkerArray()
+        ids = set()
+        for obj in array.objects:
+            p, v = obj.pose.pose.position, obj.twist.twist.linear
             ids.add(obj.id)
-            markers.markers.extend(self.track_markers(array.header, obj.id, (px, py, pz), (vx, vy, vz)))
+            markers.markers.extend(self.track_markers(array.header, obj.id, (p.x, p.y, p.z), (v.x, v.y, v.z)))
         for stale in self.last_marker_ids - ids:
             for ns in ("position", "velocity", "label"):
                 marker = Marker(header=array.header, ns=ns, id=stale, action=Marker.DELETE)
