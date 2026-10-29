@@ -9,6 +9,12 @@ keeping the previous match while it stays within it; a person whose matched
 track changes is a switch. The counters in the GIF therefore equal the IDSW
 that mot_metrics.py reports for the same files.
 
+With --velocity each track gets an arrow to where its velocity takes it in
+--arrow-s seconds, each labelled person a grey arrow for the label velocity
+(slope of a line fitted to their labelled positions within +-5 scans), and
+each panel the running median velocity error, computed as in
+scripts/eval/velocity_error.py (so its final value equals that script's).
+
 Inputs: a window directory written by scripts/eval/coda_tracker_eval.sh
 (setup.json, truth.jsonl and one output .jsonl per tracker) and the CODa scans
 for the LiDAR points.
@@ -26,12 +32,12 @@ docs/evaluation.md):
     python3 scripts/eval/nms_variants.py raw nms iou0.1 iou0.3
     PY=python3 scripts/eval/coda_tracker_eval.sh nms/iou0.1 CODa 0.4 work_a
     PY=python3 scripts/eval/coda_tracker_eval.sh nms/iou0.3 CODa 0.5 work_b
-    cp work_b/coda20_12700/20/engine_birth.jsonl work_a/coda20_12700/20/
+    cp work_b/coda20_12700/20/engine_smooth.jsonl work_a/coda20_12700/20/
     python3 scripts/hero/render_compare.py work_a/coda20_12700/20 assets/compare_ab3dmot.gif \
-        --coda-root CODa --sequence 20 \
+        --coda-root CODa --sequence 20 --velocity \
         --left ab3dmot.jsonl "AB3DMOT-style (NMS 0.1, score >= 0.4)" \
-        --right engine_birth.jsonl "factor-tracker (NMS 0.3, score >= 0.5, birth suppression)" \
-        --title "Same detector, two trackers: identity switches" --subtitle ... --footer ...
+        --right engine_smooth.jsonl "factor-tracker (NMS 0.3, score >= 0.5, 0.5 s smoothing)" \
+        --title "Same detector, two trackers: identity switches and velocity" --subtitle ... --footer ...
 """
 
 from __future__ import annotations
@@ -48,6 +54,7 @@ from PIL import Image, ImageDraw
 from scipy.optimize import linear_sum_assignment
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(1, str(Path(__file__).resolve().parents[1] / "eval"))
 from render_hero import (  # noqa: E402
     BORDER, F_LABEL, F_SMALL, F_SUB, F_TAG, F_TITLE, GRID, MARGIN, PANEL, SURFACE, TEXT, TEXT_2, TEXT_3,
     encode_gif, font, mat4, tint,
@@ -55,6 +62,7 @@ from render_hero import (  # noqa: E402
 
 SWITCH = (239, 68, 68)
 TRUTH = (100, 116, 139)
+TRUTH_ARROW = (148, 163, 184)
 POINTS = (71, 85, 105)
 # Track colours cycle through a validated dark-theme categorical set.
 PALETTE = [(57, 135, 229), (217, 89, 38), (25, 158, 112), (196, 140, 32), (152, 102, 214), (36, 160, 178),
@@ -63,13 +71,45 @@ F_COUNT = font(22, "Bold")
 
 
 def load_frames(path: Path) -> dict[int, list]:
+    """Confirmed tracks per scan: (id, position, horizontal velocity); the smoothed frames of a dual output."""
+    from mot_metrics import lidar_frames  # scripts/eval
+
     frames = {}
-    for line in open(path):
-        r = json.loads(line)
-        if r.get("type") == "lidar_frame":
-            frames[r["timestamp_ns"]] = [(t["track_id"], np.array(t["position"][:3], float)) for t in r["tracks"]
-                                         if t["lifecycle"] == "confirmed"]
+    for r in lidar_frames(path):
+        frames[r["timestamp_ns"]] = [(t["track_id"], np.array(t["position"][:3], float), np.array(t["velocity"][:2], float))
+                                     for t in r["tracks"] if t["lifecycle"] == "confirmed"]
     return frames
+
+
+def label_velocities(times, truth):
+    """Per scan: {person: horizontal velocity}, the slope of their labelled positions within +-5 scans (>= 5)."""
+    at = {t: dict(objs) for t, objs in truth.items()}
+    out = {}
+    for k, t in enumerate(times):
+        out[t] = {}
+        for g, _ in truth.get(t, []):
+            scans = [times[q] for q in range(max(0, k - 5), min(len(times), k + 6)) if g in at.get(times[q], {})]
+            if len(scans) >= 5:
+                dt = np.array([(s - t) * 1e-9 for s in scans])
+                out[t][g] = np.polyfit(dt, np.array([at[s][g][:2] for s in scans]), 1)[0]
+    return out
+
+
+def velocity_errors(times, truth, frames, label_velocity, dmax):
+    """Per scan: velocity errors of the matched tracks, matched as in velocity_error.py (Hungarian within dmax)."""
+    errors = {}
+    for t in times:
+        objs, tracks = truth.get(t, []), frames.get(t, [])
+        errors[t] = []
+        if not objs or not tracks:
+            continue
+        d = np.linalg.norm(np.array([p for _, p in objs])[:, None] - np.array([p for _, p, _ in tracks])[None], axis=2)
+        cost = np.where(d <= dmax, d, 1e6)
+        for r, c in zip(*linear_sum_assignment(cost)):
+            v = label_velocity[t].get(objs[r][0])
+            if cost[r, c] < 1e6 and v is not None:
+                errors[t].append(float(np.linalg.norm(tracks[c][2] - v)))
+    return errors
 
 
 def load_truth(path: Path) -> dict[int, list]:
@@ -89,10 +129,10 @@ def switches(times, truth, frames, dmax):
         events[t] = []
         if not objs or not tracks:
             continue
-        d = np.linalg.norm(np.array([p for _, p in objs])[:, None] - np.array([p for _, p in tracks])[None], axis=2)
+        d = np.linalg.norm(np.array([p for _, p in objs])[:, None] - np.array([p for _, p, _ in tracks])[None], axis=2)
         cost = np.where(d <= dmax, d, 1e6)
         for r, (g, _) in enumerate(objs):
-            for c, (k, _) in enumerate(tracks):
+            for c, (k, _, _) in enumerate(tracks):
                 if last.get(g) == k and d[r, c] <= dmax:
                     cost[r, c] = -1.0
         for r, c in zip(*linear_sum_assignment(cost)):
@@ -103,6 +143,18 @@ def switches(times, truth, frames, dmax):
                 events[t].append((objs[r][1], last[g], k))
             last[g] = k
     return events
+
+
+def arrow(draw, panel, start, delta, color, width):
+    """An arrow from `start` (robot frame) along `delta` (horizontal, m), clipped to the panel."""
+    u0, v0 = panel.px(start)
+    u1, v1 = panel.px((start[0] + delta[0], start[1] + delta[1]))
+    if not (panel.inside(u0, v0) and panel.inside(u1, v1)) or np.hypot(u1 - u0, v1 - v0) < 3:
+        return
+    draw.line((u0, v0, u1, v1), fill=color, width=width)
+    a = np.arctan2(v1 - v0, u1 - u0)
+    head = [(u1, v1)] + [(u1 - 7 * np.cos(a + s), v1 - 7 * np.sin(a + s)) for s in (0.45, -0.45)]
+    draw.polygon(head, fill=color)
 
 
 class Panel:
@@ -142,6 +194,8 @@ def main() -> None:
     ap.add_argument("--hold-s", type=float, default=1.5, help="how long a switch marker stays")
     ap.add_argument("--colors", type=int, default=96)
     ap.add_argument("--end-hold-s", type=float, default=2.5, help="how long the last frame stays")
+    ap.add_argument("--velocity", action="store_true", help="velocity arrows and the running velocity error")
+    ap.add_argument("--arrow-s", type=float, default=2.0, help="arrow length: where the velocity leads in this time")
     args = ap.parse_args()
 
     setup = json.loads((args.window / "setup.json").read_text())
@@ -154,10 +208,13 @@ def main() -> None:
             numbers[r["event_time_ns"]] = r["sequence"]
     times = sorted(t for t in numbers if t in poses)
     truth = load_truth(args.window / "truth.jsonl")
+    label_velocity = label_velocities(times, truth) if args.velocity else {}
     sides = []
     for output, label in (args.left, args.right):
         frames = load_frames(args.window / output)
-        sides.append({"label": label, "frames": frames, "events": switches(times, truth, frames, args.max_distance)})
+        sides.append({"label": label, "frames": frames, "events": switches(times, truth, frames, args.max_distance),
+                      "errors": velocity_errors(times, truth, frames, label_velocity, args.max_distance)
+                      if args.velocity else {}})
 
     width = 2 * args.panel + 3 * MARGIN
     top = 96
@@ -171,9 +228,11 @@ def main() -> None:
         trails = [defaultdict(lambda: deque(maxlen=15)) for _ in sides]
         markers = [[] for _ in sides]
         counts = [0, 0]
+        errors_so_far = [[], []]
         for n, t in enumerate(times):
             world_to_ref = np.linalg.inv(poses[t])
             to_ref = lambda p: (world_to_ref @ np.append(p, 1.0))[:3]  # noqa: E731
+            rotate = lambda v: world_to_ref[:2, :2] @ v  # noqa: E731  (world velocity -> robot frame)
             scan = args.coda_root / "3d_comp" / "os1" / args.sequence / f"3d_comp_os1_{args.sequence}_{numbers[t]}.bin"
             points = np.fromfile(scan, dtype=np.float32).reshape(-1, 4)[:, :3]
             points = points[(points[:, 2] > -1.2) & (points[:, 2] < 1.5)][::3]
@@ -191,6 +250,12 @@ def main() -> None:
                 count = f"ID switches: {counts[k]}"
                 draw.text((box[2] - draw.textlength(count, font=F_COUNT), top + 2), count, font=F_COUNT,
                           fill=SWITCH if counts[k] else TEXT_2)
+                if args.velocity:
+                    errors_so_far[k] += side["errors"][t]
+                    if errors_so_far[k]:
+                        text = f"velocity error (median): {np.median(errors_so_far[k]):.2f} m/s"
+                        draw.text((box[2] - draw.textlength(text, font=F_SMALL), top + 28), text, font=F_SMALL,
+                                  fill=TEXT_2)
                 draw.rectangle(box, fill=PANEL, outline=BORDER)
                 for r in range(10, int(args.range_m) + 1, 10):
                     u0, v0 = panel.px((r, r))
@@ -201,21 +266,26 @@ def main() -> None:
                     u, v = panel.px(p)
                     if panel.inside(u, v, 1):
                         draw.point((u, v), fill=POINTS)
-                for _, p in truth.get(t, []):
+                for g, p in truth.get(t, []):
                     u, v = panel.px(to_ref(p))
                     if panel.inside(u, v):
                         draw.ellipse((u - 6, v - 6, u + 6, v + 6), outline=TRUTH)
+                        if g in label_velocity.get(t, {}):
+                            arrow(draw, panel, to_ref(p), rotate(label_velocity[t][g]) * args.arrow_s, TRUTH_ARROW, 2)
                 tracks = side["frames"].get(t, [])
-                for track_id, p in tracks:
+                for track_id, p, _ in tracks:
                     trails[k][track_id].append(p)
-                for track_id, p in tracks:
+                for track_id, p, velocity in tracks:
                     color = PALETTE[track_id % len(PALETTE)]
                     trail = [panel.px(to_ref(q)) for q in trails[k][track_id]]
                     trail = [q for q in trail if panel.inside(*q)]
                     for a, b in zip(trail, trail[1:]):
-                        draw.line((a, b), fill=tint(color, 0.55), width=2)
+                        # With arrows, the trail recedes so the arrow reads as the motion.
+                        draw.line((a, b), fill=tint(color, 0.3 if args.velocity else 0.55), width=1 if args.velocity else 2)
                     u, v = panel.px(to_ref(p))
                     if panel.inside(u, v):
+                        if args.velocity:
+                            arrow(draw, panel, to_ref(p), rotate(velocity) * args.arrow_s, color, 3)
                         draw.ellipse((u - 4, v - 4, u + 4, v + 4), fill=color)
                         draw.text((u + 6, v - 7), str(track_id), font=F_TAG, fill=tint(color, 0.9, TEXT))
                 for m in markers[k]:
@@ -231,9 +301,15 @@ def main() -> None:
                              fill=TEXT)
             legend_y = boxes[0][3] + 12
             x = MARGIN
-            for swatch, text in ((None, "person (truth)"), (PALETTE[0], "confirmed track + ID"),
-                                 (SWITCH, "identity switch (old->new ID)")):
-                if swatch is None:
+            legend = [(None, "person (truth)"), (PALETTE[0], "confirmed track + ID"),
+                      (SWITCH, "identity switch (old->new ID)")]
+            if args.velocity:
+                legend.append(("arrows", f"velocity, {args.arrow_s:g} s ahead (grey: labels)"))
+            for swatch, text in legend:
+                if swatch == "arrows":
+                    draw.line((x, legend_y + 8, x + 14, legend_y + 8), fill=PALETTE[0], width=2)
+                    draw.polygon([(x + 16, legend_y + 8), (x + 10, legend_y + 4), (x + 10, legend_y + 12)], fill=PALETTE[0])
+                elif swatch is None:
                     draw.ellipse((x, legend_y + 2, x + 12, legend_y + 14), outline=TRUTH)
                 elif swatch == SWITCH:
                     draw.ellipse((x, legend_y + 1, x + 14, legend_y + 15), outline=SWITCH, width=2)
@@ -249,7 +325,10 @@ def main() -> None:
         for k in range(int(round(args.end_hold_s * args.fps))):
             img.save(Path(tmp) / f"{len(times) + k:04d}.png")
         encode_gif(Path(tmp), args.out, args.fps, None, args.colors, "none")
-    print(f"{args.out}: {len(times)} frames, ID switches {counts[0]} vs {counts[1]}")
+    summary = f"{args.out}: {len(times)} frames, ID switches {counts[0]} vs {counts[1]}"
+    if args.velocity:
+        summary += ", median velocity error " + " vs ".join(f"{np.median(e):.3f} m/s" for e in errors_so_far)
+    print(summary)
 
 
 if __name__ == "__main__":
