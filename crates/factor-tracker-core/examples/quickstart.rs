@@ -57,6 +57,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 class_label: None,
                 appearance: None,
                 score: None,
+                velocity: None,
             }],
         })?;
         for track in tracks {

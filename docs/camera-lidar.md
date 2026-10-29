@@ -110,6 +110,23 @@ its confidence is at least the given value (0.73 on KITTI, `docs/evaluation.md`)
 the track keeps its id while it is not reported. With the ROS 2 node, pass it
 in `engine_args`. Tracks re-estimated by `--fgo-lag` carry none.
 
+## Measured velocities
+
+Detectors such as CenterPoint (and MEGVII on nuScenes) regress each box's
+velocity. A LiDAR detection can carry it as `velocity`, `[vx, vy]` in m/s
+over ground along the LiDAR frame's x and y axes:
+
+```json
+{"position":[12.1,-3.4,0.9], "covariance":[...], "score":0.8, "velocity":[1.2,-0.3]}
+```
+
+With `--velocity-std S` (`Cartesian3DTrackerConfig::velocity_measurement_std`)
+the engine rotates it into the tracking frame and, after the position update,
+updates the track's horizontal velocity with it (a second Kalman update with
+standard deviation S per axis; independent of the position, so the same as
+one stacked update). A track started from such a detection begins with its
+velocity instead of standing still. Without the flag the field is ignored.
+
 ## Camera projection and association
 
 For each camera batch at time `t_cam`:

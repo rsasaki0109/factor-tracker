@@ -186,6 +186,7 @@ mod tests {
                     score: 0.9,
                     shape: None,
                     appearance: None,
+                    velocity: None,
                 }],
                 landmarks: Vec::new(),
             };

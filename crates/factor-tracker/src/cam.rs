@@ -89,6 +89,8 @@ pub struct TrackerOverrides {
     pub confidence_alpha: Option<f64>,
     /// Report only tracks with at least this confidence.
     pub report_min_confidence: Option<f64>,
+    /// Standard deviation (m/s) of the detections' measured velocities.
+    pub velocity_std: Option<f64>,
     /// Minimum detection score to start a track.
     pub new_track_score_threshold: Option<f64>,
     /// Correct each scan's ego pose with its static landmarks.
@@ -309,6 +311,9 @@ fn engine_config(
     }
     if let Some(value) = overrides.confidence_alpha {
         config.confidence_alpha = value;
+    }
+    if let Some(value) = overrides.velocity_std {
+        config.tracker.velocity_measurement_std = Some(value);
     }
     if let Some(value) = overrides.lost_to_delete_ms {
         config.tracker.common.lost_to_delete_ns = value * 1_000_000;

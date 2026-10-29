@@ -54,6 +54,7 @@ fn lidar_detection(position: Vector3<f64>, class: Option<u32>) -> LidarDetection
         score: 0.9,
         shape: Some(shape()),
         appearance: None,
+        velocity: None,
     }
 }
 

@@ -27,7 +27,7 @@ use factor_tracker_core::{
     FrameId, ObservationBatch3D, ObservationOutcome, Position3DObservation, Timestamp, TrackId,
     TrackLifecycleState,
 };
-use nalgebra::{Matrix3, Vector3};
+use nalgebra::{Matrix3, Vector2, Vector3};
 use serde::{Deserialize, Serialize};
 
 use crate::camera::{
@@ -529,6 +529,10 @@ impl CameraAssistedLidarEngine {
                 class_label: detection.class_label,
                 appearance: detection.appearance.clone(),
                 score: Some(detection.score),
+                velocity: detection.velocity.map(|v| {
+                    let v = rotation * Vector3::new(v.x, v.y, 0.0);
+                    Vector2::new(v.x, v.y)
+                }),
             });
         }
 

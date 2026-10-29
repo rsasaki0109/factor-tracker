@@ -8,7 +8,7 @@ use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::Path;
 
 use factor_tracker_core::{BBox2D, ClassLabel, FrameId, SensorId, Timestamp};
-use nalgebra::{Matrix3, Vector3};
+use nalgebra::{Matrix3, Vector2, Vector3};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use crate::engine::{CameraFrameOutput, LidarFrameOutput};
@@ -58,6 +58,10 @@ pub struct LidarDetectionRecord {
     /// Optional appearance embedding (any length; compared by cosine).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub appearance: Option<Vec<f32>>,
+    /// Optional measured velocity over ground `[vx, vy]` (m/s, LiDAR frame
+    /// axes).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub velocity: Option<Vec<f64>>,
 }
 
 /// A static landmark (pole, tree, bin, ...) seen by the LiDAR.
@@ -260,6 +264,13 @@ impl EngineInputRecord {
                             }
                             None => None,
                         };
+                        let velocity = match &record.velocity {
+                            Some(v) => Some(Vector2::from(vector::<2>(
+                                &format!("detection {index} velocity"),
+                                v,
+                            )?)),
+                            None => None,
+                        };
                         Ok(LidarDetection {
                             position,
                             covariance,
@@ -267,6 +278,7 @@ impl EngineInputRecord {
                             score: record.score,
                             shape,
                             appearance: record.appearance.clone(),
+                            velocity,
                         })
                     })
                     .collect::<EngineResult<Vec<_>>>()?;
