@@ -590,6 +590,7 @@ impl FixedLagRefiner {
                 class_prior: None,
                 contributing_sensors: sensors.clone(),
                 observation_times_count: prefix.count,
+                confidence: None,
             });
         }
         let forget = c.forget_after_ns;

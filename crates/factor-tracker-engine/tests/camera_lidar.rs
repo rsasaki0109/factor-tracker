@@ -242,6 +242,45 @@ fn missing_pose_skips_batch_without_state_change() {
 }
 
 #[test]
+fn confidence_is_a_moving_average_of_detection_log_odds() {
+    let mut engine = factor_tracker_engine::CameraAssistedLidarEngine::new(
+        EngineConfig {
+            mode: TrackingMode::LidarOnly,
+            ..EngineConfig::default()
+        },
+        test_calibration(),
+        None,
+    )
+    .unwrap();
+    for (k, score) in [0.5, 0.5, 0.95, 0.95].into_iter().enumerate() {
+        let t = Timestamp::from_nanos(k as i64 * 100_000_000);
+        let detection = LidarDetection {
+            score,
+            ..lidar_detection(Vector3::new(10.0, 0.0, 0.0), None)
+        };
+        engine.ingest(lidar_batch(1, k as u64, t, vec![detection]), t);
+    }
+    engine.flush().unwrap();
+    let confidence: Vec<f64> = engine
+        .lidar_frames()
+        .iter()
+        .map(|frame| frame.tracks[0].confidence.unwrap())
+        .collect();
+    // log-odds 0, 0, ln 19, ln 19 averaged with weight 0.3
+    let strong = 19f64.ln();
+    let c2 = 0.3 * strong;
+    let c3 = c2 + 0.3 * (strong - c2);
+    let sigmoid = |x: f64| 1.0 / (1.0 + (-x).exp());
+    for (got, want) in confidence.iter().zip([0.5, 0.5, sigmoid(c2), sigmoid(c3)]) {
+        assert!((got - want).abs() < 1e-9, "{confidence:?}");
+    }
+    assert_eq!(
+        engine.lidar_frames()[3].tracks[0].track_id,
+        engine.lidar_frames()[0].tracks[0].track_id
+    );
+}
+
+#[test]
 fn camera_miss_does_not_drop_track() {
     let calibration = projection_calibration();
     let mut engine = factor_tracker_engine::CameraAssistedLidarEngine::new(

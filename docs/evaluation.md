@@ -773,6 +773,79 @@ the 90th percentile by 28 % and 30 %; HOTA rises through localization (LocA
 0.866 -> 0.871 dev). Longer lags add little. `coda_tracker_eval.sh` prints
 the smoothed rows as `engine_smooth` and `engine_pose_smooth`.
 
+### KITTI 3D MOT, PointRCNN pedestrians (AB3DMOT's protocol)
+
+The standard 3D MOT comparison: the KITTI tracking validation split (11
+sequences), the PointRCNN detections AB3DMOT ships, and AB3DMOT's evaluator
+(`scripts/KITTI/evaluate.py`, 3D IoU 0.25; sAMOTA, MOTA, ID switches,
+fragmentations). Both trackers write AB3DMOT's pedestrian output: a track from
+its first detection and for up to three missed scans, with the detection's
+box size, heading and image box. Running AB3DMOT's own code reproduces its
+published pedestrian row (sAMOTA 82.73, MOTA 73.86, 4 ID switches): 83.24,
+73.86, 4.
+
+AB3DMOT's settings were tuned on the whole validation split. To compare
+fairly, the split was halved: every choice below was made on the tune half
+(0001 0006 0010 0013 0016 0018), and the test half (0008 0012 0014 0015
+0019) was scored once with the final settings. The earlier rows were scored
+on the test half afterwards, only to see whether each step carries over:
+
+| setting | tune sAMOTA / MOTA / IDS | test sAMOTA / MOTA / IDS | whole split sAMOTA / MOTA / IDS |
+| --- | --- | --- | --- |
+| CODa pedestrian settings, confirmed tracks updated in the scan | 0.718 / 0.630 / 0 | 0.798 / 0.727 / 26 | 0.767 / 0.685 / 29 |
+| AB3DMOT's output, no birth suppression, detection std 0.1 m | 0.740 / 0.591 / 0 | 0.851 / 0.745 / 20 | 0.816 / 0.691 / 20 |
+| + report a track only while its confidence is >= 0.73 | **0.774 / 0.680 / 1** | 0.861 / 0.760 / 20 | 0.818 / 0.727 / 21 |
+| AB3DMOT (tuned on the whole split) | 0.761 / 0.668 / 0 | **0.865 / 0.771 / 5** | **0.832 / 0.739 / 4** |
+
+On the test half factor-tracker trails AB3DMOT by 0.4 sAMOTA and 1.2 MOTA
+points, with 20 ID switches to 5 (fragmentations 77 to 57): it associates by
+centre distance, AB3DMOT by 3D GIoU of the boxes. Birth suppression, which
+absorbs duplicate boxes on CODa, suppresses real neighbours here (348 of the
+boxes AB3DMOT writes and the suppressed run did not).
+
+#### Track confidence
+
+The evaluator scores a track by the average score of its boxes and drops
+whole tracks below a threshold (the one that maximizes MOTA; sAMOTA sweeps
+it). KITTI labels pedestrians only from some distance on, and PointRCNN sees
+them earlier with weak scores: in 0013 a person walking towards the car from
+47 m is one factor-tracker track over 140 scans, and five AB3DMOT tracks.
+Averaged over the unlabelled, weak part, the long track falls below the
+threshold and is lost entirely (438 missed boxes on the tune half, 260 for
+AB3DMOT's fragments).
+
+Each track therefore carries a confidence (`TrackOutput.confidence`): the
+moving average, with weight 0.3 for the newest detection, of the log-odds of
+the detection scores that updated it, as a probability.
+`--report-min-confidence` reports a track only while its confidence is high
+enough; it keeps its id meanwhile. The KITTI result files carry the
+confidence as the box score, as log-odds (PointRCNN's own scale, which
+AB3DMOT writes). Other choices, on the tune half:
+
+| setting | sAMOTA | MOTA |
+| --- | --- | --- |
+| detection score, as a probability | 0.740 | 0.591 |
+| detection score, as log-odds | 0.755 | 0.630 |
+| track score: sum of detection log-odds, log(1 - 0.9) per missed scan (MHT) | 0.710 | 0.642 |
+| confidence (weight 0.3), all tracks reported | 0.754 | 0.628 |
+| confidence (weight 0.3), reported from log-odds 0.5 / 1 / 1.5 | 0.771 / 0.774 / 0.759 | 0.663 / 0.680 / 0.671 |
+| confidence (weight 0.2 / 0.5), reported from log-odds 1 | 0.773 / 0.773 | 0.668 / 0.671 |
+
+The cumulative (MHT) score ranks long false tracks (static clutter) first.
+Reporting from 0.73 (log-odds 1) is the setting in the table above.
+
+To reproduce (a checkout of https://github.com/xinshuoweng/AB3DMOT for its
+detections and evaluator; its code is not part of this repository):
+
+```sh
+scripts/kitti/ab3dmot_benchmark.sh <kitti-root> <ab3dmot-root> work factor_tracker
+cd <ab3dmot-root> && python3 scripts/KITTI/evaluate.py factor_tracker 1 3D 0.25
+```
+
+The evaluator scores the sequences in `scripts/KITTI/evaluate_tracking.seqmap.val`;
+for a half, run it from a directory holding `scripts/KITTI/label` (a link),
+a seqmap with those lines, and `results/KITTI` (a link).
+
 ## Reproducing
 
 ```sh

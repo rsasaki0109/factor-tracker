@@ -90,6 +90,10 @@ pub struct EngineConfig {
     /// before its detections are tracked ([`crate::landmarks`]). `None`
     /// uses the poses as given.
     pub pose_correction: Option<LandmarkConfig>,
+    /// Weight of the newest detection in a track's confidence
+    /// ([`TrackOutput::confidence`]), in `(0, 1]`; 1 keeps only the newest
+    /// detection's score.
+    pub confidence_alpha: f64,
 }
 
 impl Default for EngineConfig {
@@ -111,6 +115,9 @@ impl Default for EngineConfig {
             max_shape_age_ns: 500_000_000,
             max_track_age_for_projection_ns: 1_000_000_000,
             pose_correction: None,
+            // Tuned on half of the KITTI tracking validation split; see
+            // docs/evaluation.md ("Track confidence").
+            confidence_alpha: 0.3,
         }
     }
 }
@@ -134,6 +141,9 @@ impl EngineConfig {
         }
         if let Some(pose_correction) = &self.pose_correction {
             pose_correction.validate()?;
+        }
+        if !(self.confidence_alpha > 0.0 && self.confidence_alpha <= 1.0) {
+            return Err(EngineError::config("confidence_alpha must be in (0, 1]"));
         }
         Ok(())
     }
@@ -170,6 +180,14 @@ pub struct TrackOutput {
     pub contributing_sensors: Vec<u32>,
     /// Distinct observation timestamps.
     pub observation_times_count: u32,
+    /// Confidence in `[0, 1]` that the track is a real object now: the
+    /// exponential moving average (weight `confidence_alpha`) of the
+    /// log-odds of the detection scores that updated it, as a probability.
+    /// Low while the track rests on weak detections (a person far away),
+    /// high once they are strong; the id stays the same throughout. `None`
+    /// for tracks without a detection score (the factor-graph refiner).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<f64>,
 }
 
 /// Association summary for one LiDAR observation.
@@ -272,6 +290,8 @@ pub struct CameraAssistedLidarEngine {
     shapes: HashMap<TrackId, ShapeRecord>,
     class_evidence: HashMap<TrackId, ClassEvidence>,
     last_camera_support: HashMap<TrackId, Timestamp>,
+    /// Per track: moving average of its detections' log-odds.
+    confidence: HashMap<TrackId, f64>,
     buffer: AsyncReorderBuffer,
     pose_corrector: Option<LandmarkPoseCorrector>,
     counters: EngineCounters,
@@ -311,6 +331,7 @@ impl CameraAssistedLidarEngine {
             shapes: HashMap::new(),
             class_evidence: HashMap::new(),
             last_camera_support: HashMap::new(),
+            confidence: HashMap::new(),
             buffer,
             pose_corrector,
             counters: EngineCounters::default(),
@@ -534,14 +555,21 @@ impl CameraAssistedLidarEngine {
             }
         };
 
-        // Attach shape metadata to updated/spawned tracks.
+        // Attach shape metadata and confidence to updated/spawned tracks.
         for association in &report.associations {
             let Some(track_id) = association.track_id else {
                 continue;
             };
             match association.outcome {
                 ObservationOutcome::Updated | ObservationOutcome::Spawned => {
-                    if let Some(shape) = &batch.detections[association.observation_index].shape {
+                    let detection = &batch.detections[association.observation_index];
+                    let log_odds = log_odds(detection.score);
+                    let alpha = self.config.confidence_alpha;
+                    self.confidence
+                        .entry(track_id)
+                        .and_modify(|c| *c += alpha * (log_odds - *c))
+                        .or_insert(log_odds);
+                    if let Some(shape) = &detection.shape {
                         self.shapes.insert(
                             track_id,
                             ShapeRecord {
@@ -793,6 +821,7 @@ impl CameraAssistedLidarEngine {
         self.shapes.retain(|id, _| live.contains(id));
         self.class_evidence.retain(|id, _| live.contains(id));
         self.last_camera_support.retain(|id, _| live.contains(id));
+        self.confidence.retain(|id, _| live.contains(id));
     }
 
     fn track_outputs(
@@ -831,10 +860,20 @@ impl CameraAssistedLidarEngine {
                         .map(|sensor| sensor.value())
                         .collect(),
                     observation_times_count: snapshot.observation_times_count,
+                    confidence: self
+                        .confidence
+                        .get(&snapshot.track_id)
+                        .map(|log_odds| 1.0 / (1.0 + (-log_odds).exp())),
                 }
             })
             .collect()
     }
+}
+
+/// Log-odds of a detection score, clamped away from 0 and 1.
+fn log_odds(score: f64) -> f64 {
+    let p = score.clamp(1e-6, 1.0 - 1e-6);
+    (p / (1.0 - p)).ln()
 }
 
 fn convert_match(m: &CameraDetectionMatch, detection_bbox: BBox2D) -> CameraMatchOutput {
