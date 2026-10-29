@@ -12,6 +12,7 @@
 //!     -> per-observation coordinate normalization (calibration + ego pose)
 //!     -> ego-pose correction from static landmarks (optional)
 //!     -> LiDAR position tracking (factor-tracker-core Cartesian3DTracker)
+//!     -> fixed-lag smoothing of the tracks (optional)
 //!     -> geometric camera association
 //!     -> camera class evidence as a soft prior (optional)
 //!     -> unified track output + diagnostics
@@ -39,6 +40,7 @@ pub mod landmarks;
 pub mod reorder;
 pub mod replay;
 pub mod setup;
+pub mod smoother;
 
 pub use camera::{
     associate_camera, CameraAssociationConfig, CameraDetectionMatch, ClassEvidence,
@@ -65,3 +67,4 @@ pub use input::{CameraBatch, CameraDetection, ClassMap, EngineBatch, LidarBatch,
 pub use landmarks::{LandmarkConfig, LandmarkPoseCorrector, Rigid2D};
 pub use reorder::{AsyncReorderBuffer, IngestOutcome, ReorderConfig, ReorderCounters};
 pub use setup::EngineSetup;
+pub use smoother::FixedLagSmoother;

@@ -41,8 +41,9 @@ class Scene(Node):
         super().__init__("scene")
         self.tf = TransformBroadcaster(self)
         self.pub = self.create_publisher(Detection3DArray, "detections", 10)
-        self.tracks = []
+        self.tracks, self.smoothed = [], []
         self.create_subscription(ObjectWithCovarianceArray, "tracks", self.tracks.append, 10)
+        self.create_subscription(ObjectWithCovarianceArray, "tracks/smoothed", self.smoothed.append, 10)
         self.t0 = self.get_clock().now()
 
     def step(self, publish_detections):
@@ -72,6 +73,60 @@ class Scene(Node):
             detection.results.append(hypothesis)
             msg.detections.append(detection)
         self.pub.publish(msg)
+
+
+def run_scene(*parameters):
+    """Runs the node on the scene for 2 s; returns the scene with the messages it received."""
+    tracker = TrackerNode(parameter_overrides=[
+        Parameter("engine_executable", value=CLI),
+        Parameter("tracking_frame", value="odom"),
+        *parameters,
+    ])
+    scene = Scene()
+    executor = MultiThreadedExecutor()
+    executor.add_node(tracker)
+    executor.add_node(scene)
+    spinner = threading.Thread(target=executor.spin, daemon=True)
+    spinner.start()
+    # TF at 50 Hz; detections at 10 Hz, stamped after the latest TF (as on
+    # a real robot, where odometry lags the sensor slightly).
+    for tick in range(200):
+        scene.step(publish_detections=False)
+        time.sleep(0.01)
+        if tick % 5 == 4:
+            scene.step(publish_detections=True)
+        time.sleep(0.01)
+    time.sleep(0.5)
+    executor.shutdown()
+    tracker.destroy_node()
+    scene.destroy_node()
+    return scene
+
+
+def test_smoothed_tracks_are_published_late_with_the_same_ids():
+    if not Path(CLI).exists():
+        pytest.skip(f"factor-tracker not built at {CLI}")
+    rclpy.init()
+    try:
+        scene = run_scene(Parameter("smooth_lag", value=5))
+        assert len(scene.tracks) > 20 and len(scene.smoothed) > 15, (len(scene.tracks), len(scene.smoothed))
+        # Real-time messages keep coming; smoothed ones trail by five scans
+        # (counted in scans: the scene's wall-clock rate varies under load).
+        stamps = [(m.header.stamp.sec, m.header.stamp.nanosec) for m in scene.tracks]
+        last_smoothed = max((m.header.stamp.sec, m.header.stamp.nanosec) for m in scene.smoothed)
+        assert 4 <= len(stamps) - 1 - stamps.index(last_smoothed) <= 6
+        by_stamp = {(m.header.stamp.sec, m.header.stamp.nanosec): m for m in scene.tracks}
+        compared = 0
+        for message in scene.smoothed:
+            realtime = by_stamp.get((message.header.stamp.sec, message.header.stamp.nanosec))
+            if realtime is not None:
+                assert {o.id for o in message.objects} == {o.id for o in realtime.objects}
+                compared += 1
+        assert compared > 10
+        walking = min(scene.smoothed[-1].objects, key=lambda o: abs(o.pose.pose.position.x - 3.0))
+        assert abs(walking.twist.twist.linear.y - 1.0) < 0.15
+    finally:
+        rclpy.shutdown()
 
 
 def test_tracks_are_in_odom_with_velocity():

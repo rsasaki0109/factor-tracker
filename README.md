@@ -15,39 +15,54 @@
 
 <p align="center"><em>Same detector, two trackers, each at its best setting on dev (CODa seq 20, 16 s). Red rings: identity switches against CODa's labels.</em></p>
 
-Detector-agnostic multi-object tracking and sensor fusion in Rust: Kalman
-filtering and assignment per scan, optional ego-pose correction from static
-landmarks (`--pose-correction`) and fixed-lag factor-graph re-association
-(`--fgo-lag`), and LiDAR tracks that camera detections associate with and
-label. It takes detections from any detector and outputs objects with
-stable IDs and uncertainty. The core is CPU-only (no GPU, ROS, Python or OpenCV
-dependency); a ROS 2 node and a [browser demo](https://rsasaki0109.github.io/factor-tracker/) are included.
+Multi-object tracking for robots in Rust: detections from any 3D detector in,
+people (or other objects) with stable IDs, position, velocity and covariance
+out. Kalman filtering and assignment per scan, with fixed-lag factor-graph
+smoothing and ego-pose correction on top. CPU-only; the core library has
+two dependencies (`nalgebra`, `thiserror`). A ROS 2 node and a
+[browser demo](https://rsasaki0109.github.io/factor-tracker/) are included.
+
+## Why factor-tracker
+
+Measured on CODa pedestrians, with the same detections for every tracker
+(table below):
+
+- **Fewer identity switches** than an AB3DMOT-style tracker: 773 vs 987 on the
+  development windows (562 with pose correction), 18 vs 28 on the held-out
+  ones.
+- **About 25-30 % better velocities with 0.5 s smoothing** (`--smooth-lag 5`):
+  each scan is re-estimated with the next five, which also raises HOTA. The
+  ROS 2 node publishes both: `tracks` at once, `tracks/smoothed` 0.5 s later.
+- **Robust to jittery ego poses** (`--pose-correction`): each scan is aligned
+  with the static objects the detector also reports (poles, trees, bins).
+  With 1° / 0.1 m of pose noise added, HOTA stays at 0.631 dev / 0.767
+  held-out; without it the tracker drops to 0.538 / 0.688 (AB3DMOT-style
+  0.514 / 0.649).
+- **Drop-in**: any detector, any frame with TF (ROS 2), no GPU, deterministic
+  replay of recorded detections for evaluation.
 
 ## Results
 
 Pedestrian tracking on 8 CODa windows, **same detector for every tracker**
-(CODa PV-RCNN first stage on CPU):
+(CODa PV-RCNN first stage on CPU). Velocity: median error against the
+labels.
 
-| tracker | detections (NMS IoU, score) | dev HOTA | dev IDF1 | dev ID switches | held-out HOTA | held-out IDF1 | held-out ID switches |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| Kalman + Mahalanobis gate | 0.1, >= 0.4 | 0.600 | 0.722 | 1151 | 0.745 | 0.888 | 22 |
-| AB3DMOT-style | 0.1, >= 0.4 | 0.618 | 0.746 | 987 | 0.764 | 0.882 | 28 |
-| factor-tracker | 0.1, >= 0.4 | 0.618 | 0.760 | 934 | 0.768 | 0.900 | **18** |
-| factor-tracker + birth suppression (0.8 m) | 0.3, >= 0.5 | 0.628 | 0.772 | 773 | **0.777** | 0.902 | **18** |
-| **factor-tracker** + birth suppression + pose correction | 0.3, >= 0.5 | **0.636** | **0.793** | **584** | 0.771 | **0.906** | **18** |
+| tracker | detections (NMS IoU, score) | dev HOTA | dev IDF1 | dev ID switches | dev velocity (m/s) | held-out HOTA | held-out IDF1 | held-out ID switches | held-out velocity (m/s) |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Kalman + Mahalanobis gate | 0.1, >= 0.4 | 0.600 | 0.722 | 1151 | 0.224 | 0.745 | 0.888 | 22 | 0.129 |
+| AB3DMOT-style | 0.1, >= 0.4 | 0.618 | 0.746 | 987 | 0.227 | 0.764 | 0.882 | 28 | 0.133 |
+| factor-tracker | 0.3, >= 0.5 | 0.628 | 0.772 | 773 | 0.218 | 0.777 | 0.902 | **18** | 0.129 |
+| + 0.5 s smoothing | 0.3, >= 0.5 | 0.638 | 0.773 | 767 | 0.155 | **0.782** | 0.905 | **18** | **0.099** |
+| **+ 0.5 s smoothing + pose correction** | 0.3, >= 0.5 | **0.640** | **0.793** | **562** | **0.153** | 0.774 | **0.908** | **18** | 0.102 |
 
+factor-tracker runs with distance association and no new track within 0.8 m
+of a confirmed one, which absorbs the duplicate boxes of the looser NMS.
 Each tracker uses the detection setting that is best for it on dev (5
-windows); held-out (3 windows) was scored once. A looser NMS finds more people
-in crowds but also duplicate boxes; factor-tracker absorbs the duplicates by
-not starting tracks next to confirmed ones, AB3DMOT-style cannot (HOTA 0.600
-dev with the same detections). Pose correction aligns each scan with the
-static objects the detector also reports (poles, trees, bins) before
-tracking: it removes the ego-pose jitter of two dev windows, and with 1° /
-0.1 m pose noise added keeps HOTA at 0.631 dev / 0.767 held-out, where the
-tracker without it drops to 0.538 / 0.688 (AB3DMOT-style 0.514 / 0.649); on
-held-out, whose poses are clean, it costs 0.006 HOTA. The detector was
-trained on most of these scans, so absolute numbers are optimistic for every
-tracker. Details: [`docs/evaluation.md`](docs/evaluation.md).
+windows); held-out (3 windows) was scored once per setting. Pose correction
+helps where the given poses jitter (two dev windows) and costs a little where
+they are clean (held-out). The detector was trained on most of these scans,
+so absolute numbers are optimistic for every tracker. Details:
+[`docs/evaluation.md`](docs/evaluation.md).
 
 ## How it works
 
@@ -69,6 +84,8 @@ flowchart TD
   B --> LC
   M --> LC["Lifecycle, time based:<br/>tentative → confirmed → lost → deleted"]
   LC --> O["Tracks: stable ID, position,<br/>velocity, covariance"]
+  LC -.->|"optional (smooth-lag)"| SM["Fixed-lag smoothing: each scan's states<br/>re-estimated with the next N scans<br/>(RTS pass over the track's factor graph)"]
+  SM -.-> O2["Smoothed tracks, N scans later"]
   LC -.->|"optional (fgo-lag)"| F["Fixed-lag factor-graph re-association<br/>over the last N scans: swap / merge /<br/>split / drop when the cost drops"]
   F -.-> O
   CAM["Camera 2D detections"] --> A["Project track boxes into the image,<br/>match them to 2D detections"]

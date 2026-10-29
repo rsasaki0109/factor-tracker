@@ -748,6 +748,31 @@ moving objects together is SLAMMOT (Wang et al., IJRR 2007); here the poses
 are given and only corrected, from the detections the tracker already gets:
 no point cloud and no map beyond the last few seconds.
 
+### Fixed-lag smoothing (CODa)
+
+`--smooth-lag N` re-estimates each scan's tracks with the next N scans
+(Rauch-Tung-Striebel pass over the engine's filtered states;
+`docs/camera-lidar.md`). It changes no association, only positions,
+velocities and covariances, at N scans of latency. Velocity is scored by
+`scripts/eval/velocity_error.py` (median error against the slope of a line
+fitted to the labelled positions within +-5 scans). Same detections as above
+(NMS IoU 0.3, score >= 0.5); the lag was chosen on dev and held-out scored once:
+
+| setting | dev HOTA / IDF1 / ID switches | dev velocity median / 90 % (m/s) | held-out HOTA / IDF1 / ID switches | held-out velocity median / 90 % (m/s) |
+| --- | --- | --- | --- | --- |
+| engine + birth suppression (filter) | 0.628 / 0.772 / 773 | 0.218 / 0.728 | 0.777 / 0.902 / 18 | 0.129 / 0.332 |
+| + smoothing, lag 2 (0.2 s) | 0.636 / 0.773 / 780 | 0.188 / 0.610 | | |
+| + smoothing, lag 5 (0.5 s) | 0.638 / 0.773 / 767 | 0.155 / 0.527 | 0.782 / 0.905 / 18 | 0.099 / 0.231 |
+| + smoothing, lag 10 (1.0 s) | 0.638 / 0.775 / 757 | 0.148 / 0.504 | | |
+| + pose correction | 0.636 / 0.793 / 584 | 0.197 / 0.604 | 0.771 / 0.906 / 18 | 0.126 / 0.305 |
+| + pose correction + smoothing, lag 5 | 0.640 / 0.793 / 562 | 0.153 / 0.463 | 0.774 / 0.908 / 18 | 0.102 / 0.232 |
+| AB3DMOT-style, NMS 0.1, score >= 0.4 (its best) | 0.618 / 0.746 / 987 | 0.227 / 0.738 | 0.764 / 0.882 / 28 | 0.133 / 0.344 |
+
+At 0.5 s the median velocity error drops by 29 % (dev) and 23 % (held-out),
+the 90th percentile by 28 % and 30 %; HOTA rises through localization (LocA
+0.866 -> 0.871 dev). Longer lags add little. `coda_tracker_eval.sh` prints
+the smoothed rows as `engine_smooth` and `engine_pose_smooth`.
+
 ## Reproducing
 
 ```sh

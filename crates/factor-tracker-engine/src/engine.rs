@@ -206,6 +206,10 @@ pub struct LidarFrameOutput {
     /// through it before comparing it with this frame's tracks.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pose_correction: Option<Vec<f64>>,
+    /// The tracks' states were smoothed with later scans
+    /// ([`crate::smoother::FixedLagSmoother`]); the frame is emitted late.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub smoothed: bool,
 }
 
 /// One camera association record.
@@ -587,6 +591,7 @@ impl CameraAssistedLidarEngine {
                 .map(|id| id.value())
                 .collect(),
             pose_correction,
+            smoothed: false,
         });
         let _ = report;
         Ok(())

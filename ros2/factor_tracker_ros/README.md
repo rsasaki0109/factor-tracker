@@ -11,6 +11,7 @@ process); the node only converts messages and applies TF.
 | in | `detections` | `vision_msgs/Detection3DArray` (any frame with TF to `tracking_frame`) |
 | out | `tracks` | `derived_object_msgs/ObjectWithCovarianceArray` in `tracking_frame` |
 | out | `tracks/markers` | `visualization_msgs/MarkerArray` (body, velocity arrow, ID) |
+| out | `tracks/smoothed` | with `smooth_lag` > 0: the same tracks re-estimated with the next `smooth_lag` scans, published that many scans late (same IDs, 23-29 % lower median velocity error on CODa) |
 
 Each detection is placed at its box centre and transformed into
 `tracking_frame` (default `odom`) with TF at the array's stamp, so the robot's
@@ -41,6 +42,9 @@ The detector is not included: any node publishing `Detection3DArray` works
 | `mode` | `lidar_only` | engine mode |
 | `engine_args` | pedestrian motion prior, 1 m distance association, no birth within 0.8 m of a confirmed track | extra `factor-tracker stream` flags |
 | `fgo_lag` | `0` | re-decide associations over the last N scans (fixed-lag, factor-graph cost); tracks are then published N scans late. 0 = immediate output |
+| `smooth_lag` | `0` | also publish `tracks/smoothed`: positions and velocities re-estimated with the next N scans (fixed-lag smoothing; 5 = 0.5 s at 10 Hz); `tracks` stays real-time. Not with `fgo_lag` |
+| `pose_correction` | `false` | correct each scan's pose with the static objects in `landmark_classes` (jittery odometry) |
+| `landmark_classes` | none | detector `class_id`s of static objects (poles, trees, ...): sent as landmarks for `pose_correction`, never tracked |
 | `class_map` | `person:2`, `pedestrian:2`, `Pedestrian:2` | detector `class_id` to engine class |
 | `keep_unmapped_classes` | `false` | track detections whose class is not in `class_map` |
 | `min_score` | `0.0` | drop detections below this score |
@@ -57,4 +61,7 @@ cd ros2/factor_tracker_ros && python3 -m pytest test/
 
 `test_node_e2e.py` runs the node against a robot driving at 0.5 m/s past one
 standing and one walking person and checks the tracks in `odom` (standing
-person at rest, walker at 1 m/s, two stable IDs).
+person at rest, walker at 1 m/s, two stable IDs), and with `smooth_lag` 5
+that `tracks/smoothed` trails `tracks` by five scans with the same IDs.
+Jazzy's `rclpy` is built for Python 3.12 (`python3.12 -m pytest test/` where
+`python3` is newer).
