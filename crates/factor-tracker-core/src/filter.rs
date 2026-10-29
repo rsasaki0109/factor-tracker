@@ -123,6 +123,22 @@ where
         h: &SMatrix<f64, M, N>,
         r: &SMatrix<f64, M, M>,
     ) -> Result<(), TrackerError> {
+        self.update_with(z, h, r)
+    }
+
+    /// [`KalmanFilter::update`] with a measurement of any dimension `K`, for
+    /// a second, independent measurement of the same object (for example a
+    /// velocity besides the position). Updating with independent
+    /// measurements one after the other equals one stacked update.
+    pub fn update_with<const K: usize>(
+        &mut self,
+        z: &SVector<f64, K>,
+        h: &SMatrix<f64, K, N>,
+        r: &SMatrix<f64, K, K>,
+    ) -> Result<(), TrackerError>
+    where
+        Const<K>: DimName,
+    {
         ensure_finite_vector(z, "measurement")?;
         ensure_finite_matrix(h, "measurement matrix")?;
         validate_covariance(r, "measurement covariance")?;

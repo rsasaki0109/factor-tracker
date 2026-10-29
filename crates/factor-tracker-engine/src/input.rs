@@ -7,7 +7,7 @@
 use std::collections::BTreeMap;
 
 use factor_tracker_core::{BBox2D, ClassLabel, FrameId, SensorId, Timestamp};
-use nalgebra::{Matrix3, Vector3};
+use nalgebra::{Matrix3, Vector2, Vector3};
 
 use crate::geometry::Box3DShape;
 
@@ -29,6 +29,10 @@ pub struct LidarDetection {
     /// Optional appearance embedding (e.g. a ReID feature of the detection's
     /// image crop), used as an association cue by the tracker.
     pub appearance: Option<Vec<f32>>,
+    /// Optional measured velocity over ground `[vx, vy]` in m/s, along the
+    /// LiDAR frame's x and y axes (a detector that regresses velocity, such
+    /// as CenterPoint). Used with `--velocity-std`.
+    pub velocity: Option<Vector2<f64>>,
 }
 
 /// One LiDAR sensor's detections at one event time.

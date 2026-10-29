@@ -892,6 +892,80 @@ The evaluator scores the sequences in `scripts/KITTI/evaluate_tracking.seqmap.va
 for a half, run it from a directory holding `scripts/KITTI/label` (a link),
 a seqmap with those lines, and `results/KITTI` (a link).
 
+### nuScenes tracking, MEGVII pedestrians (official devkit)
+
+The nuScenes tracking benchmark: the validation split (150 scenes, samples at
+2 Hz), the MEGVII detections nuScenes distributes as its official baseline
+input (https://www.nuscenes.org/data/detection-megvii.zip, boxes in the
+global frame with a velocity each), and the official evaluation
+(nuscenes-devkit 1.2.0 `TrackingEval`, config `tracking_nips_2019`),
+pedestrian row: AMOTA (primary), AMOTP (m, lower is better), recall, MOTA,
+ID switches. Two trackers on the same detections:
+
+- AB3DMOT, the challenge's official baseline: its released results
+  (https://www.nuscenes.org/data/tracking-megvii.zip);
+- Chiu et al., *Probabilistic 3D Multi-Object Tracking for Autonomous
+  Driving* (arXiv:2001.05673; first place, nuScenes tracking challenge,
+  NeurIPS 2019), run from its code with its published best setting
+  (`main.py val 2 m 11 greedy true`; Mahalanobis gate, covariances from the
+  training split). It reproduces the published pedestrian AMOTA (0.754
+  against 75.5).
+
+Neither tracker's code is part of this repository (both are licensed for
+noncommercial research). The validation scenes were split in name order,
+alternately, into a tune half and a test half of 75 each
+(`nuscenes_tracking.py splits`); every factor-tracker choice was made on the
+tune half and the test half scored once with the final settings. Chiu et
+al.'s published setting comes from their ablations on the whole validation
+split.
+
+| pedestrians | tune AMOTA | test AMOTA / AMOTP / recall / MOTA / IDS | whole split AMOTA |
+| --- | --- | --- | --- |
+| AB3DMOT (official results) | 0.078 | 0.109 / 1.738 / 0.242 / 0.135 / 448 | 0.094 |
+| Chiu et al. (challenge winner) | 0.774 | 0.721 / 0.570 / 0.780 / 0.622 / 143 | 0.754 |
+| **factor-tracker** | **0.833** | **0.768 / 0.417 / 0.804 / 0.643 / 124** | **0.798** |
+
+factor-tracker here: tracking in the global frame (no ego poses needed),
+association by distance within 1.5 m, the detections' velocities as
+measurements (`--velocity-std 0.5`), each box scored by the detection that
+updated its track, a track written in the samples where it is updated
+(`scripts/nuscenes/nuscenes_benchmark.sh`). What each step gave (the test
+column scored afterwards, only to see whether a step carries over):
+
+| setting | tune AMOTA / AMOTP / IDS | test AMOTA |
+| --- | --- | --- |
+| distance association within 1 m, score = track confidence | 0.815 / 0.423 / 149 | |
+| within 2 m | 0.827 / 0.369 / 106 | 0.762 |
+| + measured velocities, std 0.3 / 0.5 / 1.0 m/s | 0.824 / 0.827 / 0.826 (AMOTP 0.353 at 0.5, IDS 98) | 0.761 (0.5) |
+| + within 1.5 m (1.0 m: 0.826) | 0.829 / 0.348 / 92 | |
+| + score = the updating detection's score (final) | **0.833** / 0.349 / 90 | **0.768** |
+| final, confidence weight 0.6 as the score | 0.833 / 0.348 / 93 | |
+| velocities within 2 m, + tracks written for one missed sample | 0.813 (against 0.827) | |
+| final, lost tracks deleted after 1 s / 3 s (default 2 s) | 0.804 / 0.832 | |
+
+Most of the lead over Chiu et al. is the tracker itself (0.762 on the test
+half without velocities). The measured velocities improve localization and
+switches more than AMOTA. nuScenes thresholds the score per box (KITTI's
+evaluator averages it per track), so the newest detection's score ranks
+boxes best. At 2 Hz a lost track coasts few samples before it is needed
+again: deleting it after 1 s doubles the ID switches (KITTI, at 10 Hz,
+preferred the shorter lifetime).
+
+To reproduce (with nuscenes-devkit installed; `v1.0-trainval_meta.tgz` and
+the MEGVII detections from nuscenes.org):
+
+```sh
+scripts/nuscenes/nuscenes_benchmark.sh <dataroot> megvii_val.json work results_val.json
+python3 -c "from nuscenes.eval.tracking.evaluate import TrackingEval; \
+  from nuscenes.eval.common.config import config_factory; \
+  TrackingEval(config_factory('tracking_nips_2019'), 'results_val.json', 'val', 'eval', \
+  nusc_version='v1.0-trainval', nusc_dataroot='<dataroot>').main()"
+```
+
+The results file holds pedestrians only, so read the pedestrian row. For a
+half, keep the results of its scenes (`split/tune.txt`, `split/test.txt`)
+and restrict the devkit's `create_splits_scenes()["val"]` to them.
+
 ## Reproducing
 
 ```sh

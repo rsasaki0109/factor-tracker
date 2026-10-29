@@ -164,6 +164,7 @@ pub fn generate(seed: u64) -> EngineResult<FixtureData> {
                     class: Some(object.class),
                     score: 0.9,
                     appearance: None,
+                    velocity: None,
                     shape: Some(ShapeMetadataRecord {
                         height: object.dimensions.height,
                         width: object.dimensions.width,
@@ -218,6 +219,7 @@ pub fn generate(seed: u64) -> EngineResult<FixtureData> {
                 class: None,
                 score: 0.4,
                 appearance: None,
+                velocity: None,
                 shape: None,
             });
         }

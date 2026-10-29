@@ -346,6 +346,11 @@ pub struct Position3DObservation {
     /// `TrackerConfig::new_track_score_threshold` updates existing tracks
     /// but never starts one.
     pub score: Option<f64>,
+    /// Optional measured horizontal velocity `[vx, vy]` in m/s, in the
+    /// tracking frame (from a detector that regresses velocity, such as
+    /// CenterPoint, or from radar). Ignored unless
+    /// `Cartesian3DTrackerConfig::velocity_measurement_std` is set.
+    pub velocity: Option<Vector2<f64>>,
 }
 
 /// A batch of 2D observations from one sensor at one timestamp.

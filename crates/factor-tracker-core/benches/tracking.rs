@@ -103,6 +103,7 @@ fn make_batches_3d(objects: usize) -> Vec<ObservationBatch3D> {
                         class_label: None,
                         appearance: None,
                         score: None,
+                        velocity: None,
                     }
                 })
                 .collect();

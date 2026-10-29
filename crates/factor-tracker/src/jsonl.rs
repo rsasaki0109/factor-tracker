@@ -398,6 +398,7 @@ impl ObservationRecord {
                             class_label: record.class.map(factor_tracker_core::ClassLabel::new),
                             appearance: None,
                             score: None,
+                            velocity: None,
                         })
                     })
                     .collect::<CliResult<Vec<_>>>()?;
@@ -583,6 +584,7 @@ mod tests {
                 class_label: None,
                 appearance: None,
                 score: None,
+                velocity: None,
             }],
         };
         let record = record_from_batch_3d(&batch);

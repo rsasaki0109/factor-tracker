@@ -28,7 +28,7 @@
 
 use std::collections::BTreeMap;
 
-use nalgebra::{SMatrix, SVector, Vector3};
+use nalgebra::{Matrix2, SMatrix, SVector, Vector3};
 
 use crate::assignment::{linear_assignment, Assignment};
 use crate::association::{classes_compatible, mahalanobis_association_cost};
@@ -120,6 +120,12 @@ pub struct Cartesian3DTrackerConfig {
     pub birth_candidate_radius_m: f64,
     /// A candidate not seen again within this time (ns) is forgotten.
     pub birth_candidate_timeout_ns: i64,
+    /// When set, an observation's measured horizontal velocity
+    /// ([`Position3DObservation::velocity`]) updates the track's velocity
+    /// after its position, with this standard deviation (m/s, per axis), and
+    /// a track started from it begins with that velocity. `None` ignores
+    /// measured velocities.
+    pub velocity_measurement_std: Option<f64>,
 }
 
 impl Default for Cartesian3DTrackerConfig {
@@ -140,6 +146,7 @@ impl Default for Cartesian3DTrackerConfig {
             birth_persistence: None,
             birth_candidate_radius_m: 0.5,
             birth_candidate_timeout_ns: 300_000_000,
+            velocity_measurement_std: None,
         }
     }
 }
@@ -206,6 +213,11 @@ impl Cartesian3DTrackerConfig {
         if self.birth_candidate_timeout_ns <= 0 {
             return Err(InputError::InvalidConfig {
                 reason: "birth_candidate_timeout_ns must be > 0",
+            });
+        }
+        if matches!(self.velocity_measurement_std, Some(s) if !s.is_finite() || s <= 0.0) {
+            return Err(InputError::InvalidConfig {
+                reason: "velocity_measurement_std must be finite and > 0",
             });
         }
         if matches!(self.recent_track_window_ns, Some(window) if window <= 0) {
@@ -321,6 +333,15 @@ struct BirthCandidate {
     position: Vector3<f64>,
     last_seen: Timestamp,
     sightings: u32,
+}
+
+/// Measurement matrix of a horizontal velocity `[vx, vy]` on the state
+/// `[x, y, z, vx, vy, vz]`.
+fn velocity_h() -> SMatrix<f64, 2, 6> {
+    let mut h = SMatrix::<f64, 2, 6>::zeros();
+    h[(0, 3)] = 1.0;
+    h[(1, 4)] = 1.0;
+    h
 }
 
 /// Unit-norm copy of an embedding; `None` for missing, empty, non-finite or
@@ -581,6 +602,12 @@ impl Cartesian3DTracker {
                 }
                 .into());
             }
+            if matches!(&observation.velocity, Some(v) if !v.iter().all(|x| x.is_finite())) {
+                return Err(InputError::NonFiniteValue {
+                    context: "position3d velocity",
+                }
+                .into());
+            }
             validate_covariance(&observation.covariance, "position3d measurement covariance")?;
         }
         Ok(())
@@ -691,6 +718,15 @@ impl Cartesian3DTracker {
             self.tracks[i]
                 .filter
                 .update(&observation.position, &h, &observation.covariance)?;
+            if let (Some(std), Some(velocity)) =
+                (self.config.velocity_measurement_std, observation.velocity)
+            {
+                self.tracks[i].filter.update_with(
+                    &velocity,
+                    &velocity_h(),
+                    &(Matrix2::identity() * (std * std)),
+                )?;
+            }
             self.apply_observation(i, observation.class_label, batch);
             if let Some(observed) = normalized(observation.appearance.as_deref()) {
                 let momentum = self.config.appearance_momentum as f32;
@@ -861,6 +897,14 @@ impl Cartesian3DTracker {
         covariance[(3, 3)] = self.config.initial_velocity_variance;
         covariance[(4, 4)] = self.config.initial_velocity_variance;
         covariance[(5, 5)] = self.config.initial_velocity_variance;
+        if let (Some(std), Some(velocity)) =
+            (self.config.velocity_measurement_std, observation.velocity)
+        {
+            state[3] = velocity.x;
+            state[4] = velocity.y;
+            covariance[(3, 3)] = std * std;
+            covariance[(4, 4)] = std * std;
+        }
 
         let filter = KalmanFilter::<6, 3>::new(state, covariance)?;
         let mut lifecycle = TrackLifecycle::new(timestamp);
@@ -981,6 +1025,7 @@ mod tests {
             class_label: None,
             appearance: None,
             score: None,
+            velocity: None,
         }
     }
 
@@ -1024,6 +1069,37 @@ mod tests {
         };
         assert_eq!(run(0.0), Some(TrackId::new(1)));
         assert_eq!(run(10.0), Some(TrackId::new(2)));
+    }
+
+    #[test]
+    fn measured_velocity_starts_and_updates_the_track() {
+        let moving = |x: f64, vx: f64| Position3DObservation {
+            velocity: Some(nalgebra::Vector2::new(vx, 0.0)),
+            ..observation(x, 0.0, 0.0)
+        };
+        let run = |std: Option<f64>| {
+            let mut config = config();
+            config.velocity_measurement_std = std;
+            let mut tracker = Cartesian3DTracker::new(config).unwrap();
+            let first = tracker
+                .process_batch(&batch(1, 0, 0, vec![moving(0.0, 1.5)]))
+                .unwrap()[0]
+                .velocity
+                .x;
+            // Half a second later the position says 1 m/s, the velocity 1.5.
+            let second = tracker
+                .process_batch(&batch(1, 1, 500_000_000, vec![moving(0.5, 1.5)]))
+                .unwrap()[0]
+                .velocity
+                .x;
+            (first, second)
+        };
+        let (first, second) = run(None);
+        assert_eq!(first, 0.0, "measured velocity ignored by default");
+        assert!(second < 1.05);
+        let (first, second) = run(Some(0.3));
+        assert_eq!(first, 1.5, "a new track starts with the measured velocity");
+        assert!(second > 1.2 && second < 1.5, "{second}");
     }
 
     #[test]

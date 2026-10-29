@@ -390,6 +390,7 @@ pub fn generate_3d(seed: u64) -> Scenario3d {
                     class_label: Some(factor_tracker_core::ClassLabel::new(object.class)),
                     appearance: None,
                     score: None,
+                    velocity: None,
                 });
             }
 
@@ -412,6 +413,7 @@ pub fn generate_3d(seed: u64) -> Scenario3d {
                     class_label: Some(factor_tracker_core::ClassLabel::new(object.class)),
                     appearance: None,
                     score: None,
+                    velocity: None,
                 });
             }
 
@@ -432,6 +434,7 @@ pub fn generate_3d(seed: u64) -> Scenario3d {
                 class_label: None,
                 appearance: None,
                 score: None,
+                velocity: None,
             });
         }
 

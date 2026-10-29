@@ -115,6 +115,12 @@ struct TrackerArgs {
     /// seen with weak detections).
     #[arg(long)]
     report_min_confidence: Option<f64>,
+    /// Use the detections' measured velocities (`velocity` in lidar_batch
+    /// detections, m/s over ground) with this standard deviation (m/s): they
+    /// update each track's velocity and start new tracks moving. Default:
+    /// ignored.
+    #[arg(long)]
+    velocity_std: Option<f64>,
     /// Detections below this score only update existing tracks and never
     /// start one (ByteTrack-style use of low-score detections).
     #[arg(long)]
@@ -161,6 +167,7 @@ impl TrackerArgs {
             report_coast_ms: self.report_coast_ms,
             confidence_alpha: self.confidence_alpha,
             report_min_confidence: self.report_min_confidence,
+            velocity_std: self.velocity_std,
             new_track_score_threshold: self.new_track_score_threshold,
             pose_correction: self.pose_correction,
             smooth_lag: self.smooth_lag,

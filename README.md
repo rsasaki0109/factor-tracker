@@ -24,12 +24,15 @@ two dependencies (`nalgebra`, `thiserror`). A ROS 2 node and a
 
 ## Why factor-tracker
 
-Measured on CODa pedestrians, with the same detections for every tracker
-(table below):
+Measured with the same detections for every tracker (tables below):
 
-- **Fewer identity switches** than an AB3DMOT-style tracker: 773 vs 987 on the
-  development windows (562 with pose correction), 18 vs 28 on the held-out
-  ones.
+- **Ahead of the nuScenes tracking-challenge winner on pedestrians**: AMOTA
+  0.768 against 0.721 (Chiu et al., first place at NeurIPS 2019) on the
+  held-out half of the validation split, official devkit, MEGVII detections;
+  0.798 against 0.754 on the whole split.
+- **Fewer identity switches** on CODa than an AB3DMOT-style tracker: 773 vs
+  987 on the development windows (562 with pose correction), 18 vs 28 on the
+  held-out ones.
 - **About 25-30 % better velocities with 0.5 s smoothing** (`--smooth-lag 5`):
   each scan is re-estimated with the next five, which also raises HOTA. The
   ROS 2 node publishes both: `tracks` at once, `tracks/smoothed` 0.5 s later.
@@ -42,6 +45,24 @@ Measured on CODa pedestrians, with the same detections for every tracker
   replay of recorded detections for evaluation.
 
 ## Results
+
+### nuScenes (standard benchmark)
+
+Pedestrians on the nuScenes validation split with the MEGVII detections
+(nuScenes' official tracking baseline input), scored by the official devkit.
+factor-tracker's settings were chosen on half of the scenes and the other
+half scored once; Chiu et al. ran with their published setting.
+
+| tracker | held-out half AMOTA | AMOTP (m) | recall | MOTA | ID switches | whole split AMOTA |
+| --- | --- | --- | --- | --- | --- | --- |
+| AB3DMOT (official baseline results) | 0.109 | 1.738 | 0.242 | 0.135 | 448 | 0.094 |
+| Chiu et al. (challenge winner, NeurIPS 2019) | 0.721 | 0.570 | 0.780 | 0.622 | 143 | 0.754 |
+| **factor-tracker** | **0.768** | **0.417** | **0.804** | **0.643** | **124** | **0.798** |
+
+The detections' velocities are used as measurements (`--velocity-std`).
+Reproduction and the tuning steps: [`docs/evaluation.md`](docs/evaluation.md).
+
+### CODa (robot)
 
 Pedestrian tracking on 8 CODa windows, **same detector for every tracker**
 (CODa PV-RCNN first stage on CPU). Velocity: median error against the
