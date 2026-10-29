@@ -104,8 +104,8 @@ Every track in a `lidar_frame` carries `confidence` in `[0, 1]`: the
 exponential moving average of the log-odds of the detection scores that
 updated it (weight `EngineConfig::confidence_alpha`, `--confidence-alpha`,
 default 0.3 for the newest), as a probability. It follows the detections, so
-a person approaching from far away is one track whose confidence rises as
-the detector grows sure. `--report-min-confidence` reports a track only while
+a person first seen far away is one track whose confidence rises as the
+detector grows sure. `--report-min-confidence` reports a track only while
 its confidence is at least the given value (0.73 on KITTI, `docs/evaluation.md`);
 the track keeps its id while it is not reported. With the ROS 2 node, pass it
 in `engine_args`. Tracks re-estimated by `--fgo-lag` carry none.

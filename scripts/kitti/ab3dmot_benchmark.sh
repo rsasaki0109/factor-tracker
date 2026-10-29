@@ -17,7 +17,9 @@
 # Its seqmap (scripts/KITTI/evaluate_tracking.seqmap.val) selects the
 # sequences scored; the tune/test halves of docs/evaluation.md are subsets.
 #
-# REPLAY_ARGS overrides the engine settings below (the ones reported).
+# REPLAY_ARGS overrides the engine settings below (the ones chosen on the tune
+# half and scored once on the test half); add --lost-to-delete-ms 1000 for
+# the best setting on the whole split.
 set -euo pipefail
 REPLAY_ARGS=${REPLAY_ARGS:---initial-velocity-variance 1 --accel-spectral-density 0.5 \
 --max-association-distance-m 1.0 --recent-track-window-ns 0 --min-birth-distance-m 0 \

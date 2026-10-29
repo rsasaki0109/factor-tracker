@@ -807,9 +807,11 @@ boxes AB3DMOT writes and the suppressed run did not).
 
 The evaluator scores a track by the average score of its boxes and drops
 whole tracks below a threshold (the one that maximizes MOTA; sAMOTA sweeps
-it). KITTI labels pedestrians only from some distance on, and PointRCNN sees
-them earlier with weak scores: in 0013 a person walking towards the car from
-47 m is one factor-tracker track over 140 scans, and five AB3DMOT tracks.
+it). Far away, people stand in KITTI's DontCare regions or are not labelled,
+and PointRCNN detects them with weak scores and gaps: in 0013 a person 47 m
+ahead of the car, labelled only from about 20 m on, is one factor-tracker
+track over 140 scans (it bridges gaps of up to 19 scans) and five AB3DMOT
+tracks (which end after three missed scans).
 Averaged over the unlabelled, weak part, the long track falls below the
 threshold and is lost entirely (438 missed boxes on the tune half, 260 for
 AB3DMOT's fragments).
@@ -833,6 +835,50 @@ AB3DMOT writes). Other choices, on the tune half:
 
 The cumulative (MHT) score ranks long false tracks (static clutter) first.
 Reporting from 0.73 (log-odds 1) is the setting in the table above.
+
+#### Tuned on the whole split, like AB3DMOT
+
+With the test half spent, the settings were tuned further on the whole
+validation split, the footing AB3DMOT's own settings have:
+
+| setting (whole validation split) | sAMOTA | MOTA | IDS |
+| --- | --- | --- | --- |
+| reported above (lost tracks deleted after 2 s) | 0.818 | 0.727 | 21 |
+| lost tracks deleted after 0.8 s / 1 s / 1.3 s | 0.834 / **0.838** / 0.835 | 0.732 / 0.733 / 0.732 | 17 / 17 / 18 |
+| deleted after 1 s, reported from confidence 0.65 / 0.8 | 0.836 / 0.823 | **0.740** / 0.731 | 17 / 17 |
+| AB3DMOT | 0.832 | 0.739 | **4** |
+
+Both trackers tuned on the same split: factor-tracker is level with AB3DMOT
+on sAMOTA and MOTA and has four times its ID switches. Deleting lost tracks
+sooner splits long tracks at their gaps, which the per-track score average
+favours, as it favours AB3DMOT's (it ends a track after three missed scans).
+On CODa the shorter lifetime changes little (dev HOTA 0.627 against 0.628).
+`REPLAY_ARGS` of `scripts/kitti/ab3dmot_benchmark.sh` plus
+`--lost-to-delete-ms 1000` gives the best row.
+
+Where the 21 ID switches of the reported setting are
+(`--lost-to-delete-ms` 2 s; the evaluator counts a switch when a labelled
+person's track changes between two consecutive matched frames):
+
+- 7 in 0015: two people walking side by side, and two tracks that swap
+  between them or both sit on one of them;
+- 6 in the crowd of 0019 around frames 515-532, where AB3DMOT's 4 are too;
+- 6 elsewhere between two tracks on the same person, the evaluator's
+  matching alternating between them;
+- 2 others (a swap between neighbours, a track that ended).
+
+Two tracks on one person do not start as a second box next to a confirmed
+track: suppressing births within 0.3-0.5 m of one changes nothing. Ten
+pairs of tracks stay within 0.4 m of each other for three or more scans
+(AB3DMOT: none longer than three, as its tracks end after three misses).
+
+**Deleting duplicates (negative).** Deleting a track that stays within d of
+a track with more observations for N scans halves the switches (21 to 8-13
+for d 0.3-0.5 m, N 2-5), but sAMOTA falls to 0.77-0.80: the merged tracks
+are longer, the evaluator's best threshold rises (2.56 to 2.80 in log-odds)
+and cuts more of them. On the CODa dev windows it leaves HOTA at 0.628 and
+removes 5 % of the switches at 0.3 m (0.623 and 0.621 at 0.4 and 0.5 m).
+Not kept.
 
 To reproduce (a checkout of https://github.com/xinshuoweng/AB3DMOT for its
 detections and evaluator; its code is not part of this repository):
