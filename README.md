@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/compare_ab3dmot.gif" alt="Side-by-side bird's-eye views of the same 16 s of CODa sequence 20: an AB3DMOT-style tracker (left) makes 25 identity switches, factor-tracker (right) makes 7" width="100%">
+  <img src="assets/compare_ab3dmot.gif" alt="Side-by-side bird's-eye views of the same 16 s of CODa sequence 20 with velocity arrows: an AB3DMOT-style tracker (left) makes 25 identity switches with a median velocity error of 0.17 m/s, factor-tracker with 0.5 s smoothing (right) makes 6 with 0.13 m/s" width="100%">
 </p>
 
 <h1 align="center">Factor Graph Object Tracker</h1>
@@ -13,7 +13,7 @@
   <img src="https://img.shields.io/badge/dependencies-nalgebra%20%7C%20thiserror-informational.svg" alt="Dependencies: nalgebra, thiserror">
 </p>
 
-<p align="center"><em>Same detector, two trackers, each at its best setting on dev (CODa seq 20, 16 s). Red rings: identity switches against CODa's labels.</em></p>
+<p align="center"><em>Same detector, two trackers, each at its best setting on dev (CODa seq 20, 16 s). Red rings: identity switches against CODa's labels. Arrows: estimated velocity, 2 s ahead; grey: from the labels.</em></p>
 
 Multi-object tracking for robots in Rust: detections from any 3D detector in,
 people (or other objects) with stable IDs, position, velocity and covariance
