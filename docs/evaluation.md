@@ -807,9 +807,11 @@ boxes AB3DMOT writes and the suppressed run did not).
 
 The evaluator scores a track by the average score of its boxes and drops
 whole tracks below a threshold (the one that maximizes MOTA; sAMOTA sweeps
-it). KITTI labels pedestrians only from some distance on, and PointRCNN sees
-them earlier with weak scores: in 0013 a person walking towards the car from
-47 m is one factor-tracker track over 140 scans, and five AB3DMOT tracks.
+it). Far away, people stand in KITTI's DontCare regions or are not labelled,
+and PointRCNN detects them with weak scores and gaps: in 0013 a person 47 m
+ahead of the car, labelled only from about 20 m on, is one factor-tracker
+track over 140 scans (it bridges gaps of up to 19 scans) and five AB3DMOT
+tracks (which end after three missed scans).
 Averaged over the unlabelled, weak part, the long track falls below the
 threshold and is lost entirely (438 missed boxes on the tune half, 260 for
 AB3DMOT's fragments).
